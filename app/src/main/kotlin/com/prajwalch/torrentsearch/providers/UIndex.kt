@@ -1,0 +1,241 @@
+package com.prajwalch.torrentsearch.providers
+
+import com.prajwalch.torrentsearch.domain.model.Category
+import com.prajwalch.torrentsearch.domain.model.MagnetUri
+import com.prajwalch.torrentsearch.domain.model.SearchProviderSafety
+import com.prajwalch.torrentsearch.domain.model.Torrent
+import com.prajwalch.torrentsearch.domain.model.TorrentDetails
+import com.prajwalch.torrentsearch.network.NetworkClient
+import com.prajwalch.torrentsearch.provider.LatestTorrentsProvider
+import com.prajwalch.torrentsearch.provider.SearchProvider
+import com.prajwalch.torrentsearch.provider.SearchProviderId
+import com.prajwalch.torrentsearch.provider.TopTorrentsProvider
+import com.prajwalch.torrentsearch.provider.TorrentDetailsProvider
+import com.prajwalch.torrentsearch.util.TorrentDateParser
+import com.prajwalch.torrentsearch.util.TorrentUtils
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
+
+import java.time.Instant
+
+class UIndex(private val networkClient: NetworkClient) :
+    SearchProvider,
+    TorrentDetailsProvider,
+    LatestTorrentsProvider,
+    TopTorrentsProvider {
+    override val id = "uindex"
+    override val name = "UIndex"
+    override val url = "https://uindex.org"
+    override val cloudflareSolverUrl = "$url/search.php?search=ubuntu"
+    override val supportedCategories = setOf(
+        Category.Anime,
+        Category.Apps,
+        Category.Games,
+        Category.Movies,
+        Category.Music,
+        Category.Porn,
+        Category.Series,
+        Category.Other,
+    )
+    override val safety = SearchProviderSafety.Safe
+    override val isCloudflareProtected = true
+    override val enabledByDefault = true
+
+    private val categoryMap = mapOf(
+        Category.All to 0,
+        Category.Books to 0,
+        Category.Anime to 7,
+        Category.Apps to 5,
+        Category.Games to 3,
+        Category.Movies to 1,
+        Category.Music to 4,
+        Category.Porn to 6,
+        Category.Series to 2,
+        Category.Other to 8,
+    )
+
+    private val resultsPageParser = UIndexResultsPageParser(id, name)
+
+    override suspend fun search(query: String, category: Category): List<Torrent> {
+        val requestUrl = buildString {
+            append(url)
+            append("/search.php")
+            append("?search=$query")
+            append("&c=${categoryMap[category]}")
+        }
+        val responseHtml = networkClient.getText(url = requestUrl)
+
+        return resultsPageParser.parse(html = responseHtml, pageUrl = requestUrl)
+    }
+
+    override suspend fun getDetails(detailsPageUrl: String): TorrentDetails? {
+        val responseHtml = networkClient.getText(detailsPageUrl)
+        return UIndexDetailsPageParser.parse(responseHtml, detailsPageUrl)
+    }
+
+    override suspend fun getLastestTorrents(category: Category): List<Torrent> {
+        val requestUrl = buildString {
+            append(url)
+            append("/search.php")
+            val categoryId = categoryMap[category] ?: categoryMap[Category.All]!!
+            append("?c=$categoryId")
+        }
+        val responseHtml = networkClient.getText(requestUrl)
+
+        return resultsPageParser.parse(html = responseHtml, pageUrl = requestUrl)
+    }
+
+    override suspend fun getTopTorrents(category: Category): List<Torrent> {
+        val requestUrl = buildString {
+            append(url)
+            append("/top.php")
+            append("?t=24h")
+            val categoryId = categoryMap[category] ?: categoryMap[Category.All]!!
+            append("&c=$categoryId")
+        }
+        val responseHtml = networkClient.getText(requestUrl)
+
+        return resultsPageParser.parse(html = responseHtml, pageUrl = requestUrl)
+    }
+}
+
+private class UIndexResultsPageParser(
+    private val providerId: SearchProviderId,
+    private val providerName: String,
+) {
+    suspend fun parse(html: String, pageUrl: String): List<Torrent> =
+        withContext(Dispatchers.Default) {
+            Jsoup.parse(html, pageUrl)
+                .selectFirst(LIST_ITEM_CONTAINER)
+                ?.select(LIST_ITEM)
+                ?.mapNotNull(::parseListItem)
+                .orEmpty()
+        }
+
+    private fun parseListItem(listItem: Element): Torrent? {
+        val name = listItem.selectFirst(NAME)?.text() ?: return null
+        val magnetUri = listItem.selectFirst(MAGNET_URI)?.attr("href") ?: return null
+        val size = listItem.selectFirst(SIZE)?.ownText()
+        val seeders = listItem.selectFirst(SEEDERS)?.ownText()?.filter { it != ',' }?.toUIntOrNull()
+        val peers = listItem.selectFirst(PEERS)?.ownText()?.filter { it != ',' }?.toUIntOrNull()
+        val uploadDate = listItem.selectFirst(UPLOAD_DATE)
+            ?.ownText()
+            ?.let(TorrentDateParser::tryParseRelative)
+        val category = listItem.selectFirst(CATEGORY)?.ownText()?.let(::categoryFromRawString)
+        val detailsPageUrl = listItem.selectFirst(DETAILS_PAGE_URL)?.attr("abs:href")
+
+        val torrentRemoteId = detailsPageUrl?.takeLastWhile { it != '=' }
+        val torrentId = TorrentUtils.createTorrentId(
+            providerId = providerId,
+            sourceId = torrentRemoteId ?: TorrentUtils.getInfoHashFromMagnetUri(magnetUri),
+        )
+
+        return Torrent(
+            id = torrentId,
+            name = name,
+            size = size,
+            seeders = seeders,
+            peers = peers,
+            providerName = providerName,
+            uploadDate = uploadDate,
+            category = category,
+            magnetUri = MagnetUri.Available(magnetUri),
+            detailsPageUrl = detailsPageUrl,
+        )
+    }
+
+    private companion object {
+        private const val LIST_ITEM_CONTAINER = "table.sr-table, table.top-table"
+        private const val LIST_ITEM = "tbody > tr"
+        private const val NAME = "td.sr-col-name > a.sr-torrent-link"
+        private const val SIZE = "td.sr-col-size"
+        private const val SEEDERS = "td.sr-col-seeders > span.sr-seed"
+        private const val PEERS = "td.sr-col-leechers > span.sr-leech"
+        private const val UPLOAD_DATE = "td.sr-col-uploaded"
+        private const val CATEGORY = "td.sr-col-cat > a.sr-cat-badge"
+        private const val MAGNET_URI = "td.sr-col-name > a.sr-magnet"
+        private const val DETAILS_PAGE_URL = NAME
+    }
+}
+
+private object UIndexDetailsPageParser {
+    private const val NAME = ".dt-title"
+    private const val SIZE =
+        "#content > div.dt-info-card > div > div:nth-child(1) > div:nth-child(2) > span.dt-info-value"
+    private const val SEEDERS = ".dt-seed"
+    private const val PEERS = ".dt-leech"
+    private const val UPLOAD_DATE =
+        "#content > div.dt-info-card > div > div:nth-child(1) > div:nth-child(3) > span.dt-info-value > span.dt-info-dim"
+    private const val CATEGORY = ".sr-cat-badge"
+    private const val PEERS_UPDATED =
+        "#content > div.dt-info-card > div > div:nth-child(2) > div:nth-child(3) > span.dt-info-value > span.dt-info-dim"
+    private const val DESCRIPTION = ".dt-descr-body"
+    private const val THUMBNAIL = ".tmdb-poster > img"
+    private const val MAGNET_URI = "a.dt-download-btn"
+
+    suspend fun parse(responseHtml: String, baseUrl: String): TorrentDetails? =
+        withContext(Dispatchers.Default) {
+            val html = Jsoup.parse(responseHtml, baseUrl)
+
+            // Required data. Return early as possible.
+            val name = html.selectFirst(NAME)?.ownText() ?: return@withContext null
+            val magnetUri = html.selectFirst(MAGNET_URI)?.attr("href") ?: return@withContext null
+            val infoHash = TorrentUtils.getInfoHashFromMagnetUri(magnetUri)
+
+            val size = html.selectFirst(SIZE)?.ownText()
+            val seeders = html.selectFirst(SEEDERS)
+                ?.ownText()
+                ?.filter { it != ',' }
+                ?.toUIntOrNull()
+            val peers = html.selectFirst(PEERS)
+                ?.ownText()
+                ?.filter { it != ',' }
+                ?.toUIntOrNull()
+            val uploadDate = html.selectFirst(UPLOAD_DATE)
+                ?.ownText()
+                ?.let(::parseDate)
+            val category = html.selectFirst(CATEGORY)?.ownText()?.let(::categoryFromRawString)
+            val lastChecked = html.selectFirst(PEERS_UPDATED)
+                ?.text()
+                ?.takeIf { it.isNotBlank() }
+                ?.let(::parseDate)
+            val description = html.selectFirst(DESCRIPTION)?.html()
+            val thumbnailUrl = html.selectFirst(THUMBNAIL)?.attr("abs:src")
+
+            TorrentDetails(
+                infoHash = infoHash,
+                name = name,
+                size = size,
+                seeders = seeders,
+                peers = peers,
+                uploadDate = uploadDate,
+                category = category,
+                lastChecked = lastChecked,
+                magnetUri = magnetUri,
+                description = description,
+                posterUrl = thumbnailUrl,
+            )
+        }
+
+    private fun parseDate(date: String): Instant? =
+        TorrentDateParser.parse(
+            date = date.removeSurrounding("(", ")"),
+            format = "yyyy-MM-dd HH:mm:ss",
+        )
+}
+
+private fun categoryFromRawString(raw: String): Category = when (raw) {
+    "Anime" -> Category.Anime
+    "Apps" -> Category.Apps
+    "Games" -> Category.Games
+    "Movies" -> Category.Movies
+    "Music" -> Category.Music
+    "XXX" -> Category.Porn
+    "TV" -> Category.Series
+    "Other" -> Category.Other
+    else -> Category.Other
+}

@@ -1,0 +1,176 @@
+package com.prajwalch.torrentsearch.providers
+
+import com.prajwalch.torrentsearch.domain.model.Category
+import com.prajwalch.torrentsearch.domain.model.MagnetUri
+import com.prajwalch.torrentsearch.domain.model.SearchProviderSafety
+import com.prajwalch.torrentsearch.domain.model.Torrent
+import com.prajwalch.torrentsearch.domain.model.TorrentDetails
+import com.prajwalch.torrentsearch.extension.asObject
+import com.prajwalch.torrentsearch.extension.getArray
+import com.prajwalch.torrentsearch.extension.getLong
+import com.prajwalch.torrentsearch.extension.getObject
+import com.prajwalch.torrentsearch.extension.getString
+import com.prajwalch.torrentsearch.network.NetworkClient
+import com.prajwalch.torrentsearch.provider.SearchProvider
+import com.prajwalch.torrentsearch.provider.SearchProviderId
+import com.prajwalch.torrentsearch.provider.TorrentDetailsProvider
+import com.prajwalch.torrentsearch.util.FileSizeUtils
+import com.prajwalch.torrentsearch.util.TorrentDateParser
+import com.prajwalch.torrentsearch.util.TorrentUtils
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
+
+class InternetArchive(private val networkClient: NetworkClient) :
+    SearchProvider,
+    TorrentDetailsProvider {
+    override val id = "internetarchive"
+    override val name = "InternetArchive"
+    override val url = "https://archive.org"
+    override val supportedCategories = setOf(
+        Category.Apps,
+        Category.Books,
+        Category.Movies,
+        Category.Other,
+    )
+    override val safety = SearchProviderSafety.Safe
+    override val enabledByDefault = false
+
+    private val resultsJsonParser = IAResultsJsonParser(id, name, url)
+
+    override suspend fun search(query: String, category: Category): List<Torrent> {
+        val requestUrl = buildString {
+            append(url)
+            append("/advancedsearch.php")
+            append("?q=title:$query")
+            appendCategory(category = category)
+            append("&fl[]=title,item_size,publicdate,mediatype,identifier,btih")
+            append("&rows=100")
+            append("&page=1")
+            append("&output=json")
+        }
+
+        val responseJson = networkClient.getJson(requestUrl) ?: return emptyList()
+        return resultsJsonParser.parse(responseJson.asObject()).orEmpty()
+    }
+
+    override suspend fun getDetails(detailsPageUrl: String): TorrentDetails? {
+        val jsonMetadataPageUrl = detailsPageUrl.takeLastWhile { it != '/' }
+            .let { "https://archive.org/metadata/$it" }
+
+        return networkClient.getJson(jsonMetadataPageUrl)
+            ?.asObject()
+            ?.let { IAMetadataJsonParser.parse(it) }
+    }
+
+    private fun StringBuilder.appendCategory(category: Category) {
+        if (category == Category.All) {
+            return
+        }
+
+        this.append("%20AND%20")
+        this.append("mediatype:%28")
+        when (category) {
+            Category.All -> throw IllegalStateException("Category.All is already covered")
+            Category.Anime,
+            Category.Games,
+            Category.Music,
+            Category.Porn,
+            Category.Series,
+            Category.Other,
+                -> this.append("other")
+
+            Category.Apps -> this.append("software")
+            Category.Books -> this.append("texts")
+            Category.Movies -> this.append("movies")
+        }
+        this.append("%29")
+    }
+}
+
+private class IAResultsJsonParser(
+    private val providerId: SearchProviderId,
+    private val providerName: String,
+    private val providerUrl: String,
+) {
+    suspend fun parse(json: JsonObject): List<Torrent>? = withContext(Dispatchers.Default) {
+        json.getObject("response")
+            ?.getArray("docs")
+            ?.map { it.asObject() }
+            ?.mapNotNull { parseDocObject(it) }
+    }
+
+    private fun parseDocObject(obj: JsonObject): Torrent? {
+        val name = obj.getString("title") ?: return null
+        val infoHash = obj.getString("btih")?.lowercase()?.trim() ?: return null
+        val magnetUri = TorrentUtils.createMagnetUri(infoHash)
+
+        val torrentRemoteId = obj.getString("identifier")
+        val torrentId = TorrentUtils.createTorrentId(
+            providerId = providerId,
+            sourceId = torrentRemoteId ?: infoHash,
+        )
+
+        val size = obj.getLong("item_size")?.let { FileSizeUtils.formatBytes(it.toFloat()) }
+        val uploadDate = obj.getString("publicdate")?.let(TorrentDateParser::parseIso)
+        val category = obj.getString("mediatype")?.let(::categoryFromMediaType)
+        val descriptionPageUrl = torrentRemoteId?.let { "$providerUrl/details/$it" }
+
+        return Torrent(
+            id = torrentId,
+            name = name,
+            size = size,
+            uploadDate = uploadDate,
+            category = category,
+            providerName = providerName,
+            magnetUri = MagnetUri.Available(magnetUri),
+            detailsPageUrl = descriptionPageUrl,
+        )
+    }
+}
+
+private object IAMetadataJsonParser {
+    suspend fun parse(json: JsonObject): TorrentDetails? = withContext(Dispatchers.Default) {
+        val lastChecked = json.getLong("item_last_updated")
+            ?.let(TorrentDateParser::epochSecondToInstant)
+        val size = json.getLong("item_size")?.toFloat()?.let(FileSizeUtils::formatBytes)
+
+        val metadataObj = json.getObject("metadata") ?: return@withContext null
+        val name = metadataObj.getString("title") ?: return@withContext null
+        val uploadDate = metadataObj.getString("publicdate")
+            ?.let { TorrentDateParser.parse(date = it, format = "yyyy-MM-dd HH:mm:ss") }
+        val uploader = metadataObj.getString("uploader")
+        val description = metadataObj.getString("description")
+        val category = metadataObj.getString("metadata")?.let(::categoryFromMediaType)
+
+        val torrentObj = json.getArray("files")
+            ?.map { it.asObject() }
+            ?.find { it.containsKey("btih") }
+            ?: return@withContext null
+        val id = metadataObj.getString("identifier") ?: return@withContext null
+        val infoHash = torrentObj.getString("btih") ?: return@withContext null
+        val torrentFileName = torrentObj.getString("name") ?: return@withContext null
+        val fileDownloadLink = "https://archive.org/download/$id/$torrentFileName"
+
+        TorrentDetails(
+            infoHash = infoHash,
+            name = name,
+            size = size,
+            uploadDate = uploadDate,
+            category = category,
+            uploader = uploader,
+            lastChecked = lastChecked,
+            magnetUri = TorrentUtils.createMagnetUri(infoHash),
+            fileDownloadLink = fileDownloadLink,
+            description = description,
+        )
+    }
+}
+
+private fun categoryFromMediaType(mediaType: String) = when (mediaType) {
+    "software" -> Category.Apps
+    "texts" -> Category.Books
+    "movies" -> Category.Movies
+    else -> Category.Other
+}

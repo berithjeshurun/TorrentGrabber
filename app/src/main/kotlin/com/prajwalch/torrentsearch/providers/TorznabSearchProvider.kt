@@ -1,0 +1,74 @@
+package com.prajwalch.torrentsearch.providers
+
+import android.util.Log
+
+import com.prajwalch.torrentsearch.domain.model.Category
+import com.prajwalch.torrentsearch.domain.model.SearchProviderSafety
+import com.prajwalch.torrentsearch.domain.model.Torrent
+import com.prajwalch.torrentsearch.domain.model.TorznabConfig
+import com.prajwalch.torrentsearch.network.NetworkClient
+import com.prajwalch.torrentsearch.provider.SearchProvider
+import com.prajwalch.torrentsearch.torznab.TorznabCategoryMapper
+import com.prajwalch.torrentsearch.torznab.TorznabFunctions
+import com.prajwalch.torrentsearch.torznab.TorznabResultsXmlParser
+import com.prajwalch.torrentsearch.torznab.TorznabUtils
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+/** A search provider which is based on Torznab specification. */
+class TorznabSearchProvider(
+    private val config: TorznabConfig,
+    private val networkClient: NetworkClient,
+) : SearchProvider {
+    override val id = config.id
+    override val name = config.searchProviderName
+    override val url = config.url
+    override val supportedCategories = config.supportedCategories
+    override val safety = SearchProviderSafety.Safe
+    override val enabledByDefault = false
+
+    /** Log tag for the current config. */
+    private val tag = "$BASE_TAG($name)"
+
+    /** The XML parser for the response. */
+    private val resultsXmlParser = TorznabResultsXmlParser(providerId = id, providerName = name)
+
+    override suspend fun search(query: String, category: Category): List<Torrent> {
+        Log.d(tag, "search")
+
+        val apiUrl = TorznabUtils.normalizeApiUrl(config.url)
+        val requestUrl = buildString {
+            append(apiUrl)
+            append("?apikey=${config.apiKey}")
+            // Force client to include all attributes.
+            append("&extended=1")
+            append("&t=${TorznabFunctions.SEARCH}")
+            append("&q=$query")
+
+            if (category != Category.All) {
+                val categoriesId = getCategoriesId(category = category)
+                append("&cat=$categoriesId")
+            }
+        }
+
+        val responseXml = networkClient.getText(url = requestUrl)
+        Log.d(tag, "Received response of length ${responseXml.length}")
+
+        return withContext(Dispatchers.Default) {
+            resultsXmlParser.parse(xml = responseXml)
+        }
+    }
+
+    private fun getCategoriesId(category: Category): String? {
+        return if (category == Category.All || category !in config.supportedCategories) {
+            null
+        } else {
+            TorznabCategoryMapper.getCatParamValue(category)
+        }
+    }
+
+    companion object {
+        private const val BASE_TAG = "TorznabSearchProvider"
+    }
+}

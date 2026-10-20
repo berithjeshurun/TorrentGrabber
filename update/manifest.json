@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "name": "torrent-engine",
+  "version": "0.1.0",
+  "released_at": "2026-10-20",
+  "notes": "Initial public SDK + self-update support.",
+  "channel": "stable",
+  "engine": {
+    "version": "0.1.0",
+    "min_sdk": "0.1.0"
+  },
+  "sdk": {
+    "python": "0.1.0",
+    "javascript": "0.1.0",
+    "openapi": "0.1.0"
+  },
+  "assets": {
+    "windows-x64": {
+      "url": "",
+      "sha256": "",
+      "filename": "torrent-engine-windows-x64.zip",
+      "hint": "Upload release zip to GitHub Releases and set url + sha256 here (and on the release manifest URL)."
+    }
+  },
+  "homepage": "",
+  "manifest_url_hint": "Host this file (or a release copy) at a stable HTTPS URL. Set update.manifest_url in config.yaml or TORRENT_ENGINE_UPDATE_URL."
+}

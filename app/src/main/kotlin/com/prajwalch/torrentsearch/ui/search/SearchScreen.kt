@@ -1,0 +1,448 @@
+package com.prajwalch.torrentsearch.ui.search
+
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.retain.retain
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+import com.prajwalch.torrentsearch.R
+import com.prajwalch.torrentsearch.domain.model.Category
+import com.prajwalch.torrentsearch.domain.model.SortCriteria
+import com.prajwalch.torrentsearch.domain.model.SortOptions
+import com.prajwalch.torrentsearch.domain.model.SortOrder
+import com.prajwalch.torrentsearch.domain.model.Torrent
+import com.prajwalch.torrentsearch.ui.component.AnimatedScrollToTopFAB
+import com.prajwalch.torrentsearch.ui.component.FilterSearchBar
+import com.prajwalch.torrentsearch.ui.component.NoInternetConnectionState
+import com.prajwalch.torrentsearch.ui.component.RoundedDropdownMenu
+import com.prajwalch.torrentsearch.ui.component.SortDropdownMenu
+import com.prajwalch.torrentsearch.ui.component.TorrentClientNotFoundDialog
+import com.prajwalch.torrentsearch.ui.rememberTorrentListState
+import com.prajwalch.torrentsearch.ui.search.component.ResultsNotFoundState
+import com.prajwalch.torrentsearch.ui.search.component.SearchErrorsBottomSheet
+import com.prajwalch.torrentsearch.ui.search.component.TorrentFilter
+import com.prajwalch.torrentsearch.ui.search.component.TorrentList
+import com.prajwalch.torrentsearch.ui.theme.spaces
+import com.prajwalch.torrentsearch.ui.torrentactions.TorrentActionsBottomSheet
+
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
+
+import org.koin.androidx.compose.koinViewModel
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchScreen(
+    onNavigateBack: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    onNavigateToProviders: () -> Unit,
+    onNavigateToTorrentDetails: (id: String, url: String, providerName: String) -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: SearchViewModel = koinViewModel(),
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    val coroutineScope = rememberCoroutineScope()
+    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    val torrentListState = rememberTorrentListState(
+        itemsCount = { uiState.torrents.size },
+    )
+
+    var showTorrentClientNotFoundDialog by rememberSaveable { mutableStateOf(false) }
+    if (showTorrentClientNotFoundDialog) {
+        TorrentClientNotFoundDialog(
+            onConfirmation = { showTorrentClientNotFoundDialog = false },
+        )
+    }
+
+    var selectedResult by retain { mutableStateOf<Torrent?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    selectedResult?.let { torrent ->
+        TorrentActionsBottomSheet(
+            onDismiss = { selectedResult = null },
+            torrent = torrent,
+            onTorrentClientNotFound = { showTorrentClientNotFoundDialog = true },
+            onNavigateToDetails = onNavigateToTorrentDetails,
+            onShowSnackBar = { message ->
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(message)
+                }
+            },
+        )
+    }
+
+    var showSearchErrors by rememberSaveable { mutableStateOf(false) }
+    if (showSearchErrors) {
+        SearchErrorsBottomSheet(
+            onDismiss = { showSearchErrors = false },
+            errorItems = uiState.errors,
+            onRetryError = { error -> viewModel.retryError(error) },
+        )
+    }
+
+    var showSearchBar by rememberSaveable { mutableStateOf(false) }
+    val textFieldState = rememberTextFieldState()
+
+    if (showSearchBar) {
+        LaunchedEffect(Unit) {
+            snapshotFlow { textFieldState.text }
+                .drop(1)
+                .collectLatest { viewModel.filterSearchResultsByName(it.toString()) }
+        }
+    }
+
+    Scaffold(
+        modifier = Modifier
+            .fillMaxSize()
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .then(modifier),
+        topBar = {
+            SearchScreenTopBar(
+                onNavigateBack = onNavigateBack,
+                searchBarVisible = showSearchBar,
+                onToggleSearchBar = { showSearchBar = !showSearchBar },
+                sortOptions = uiState.sortOptions,
+                onChangeSortCriteria = viewModel::updateSortCriteria,
+                onChangeSortOrder = viewModel::updateSortOrder,
+                onRefresh = viewModel::refreshSearchResults,
+                onStopSearch = viewModel::stopSearch,
+                onShowSearchErrors = { showSearchErrors = true },
+                onNavigateToSettings = onNavigateToSettings,
+                searchState = uiState.searchState,
+                enableSearchResultsAction = uiState.searchState is SearchState.ResultsAvailable,
+                enableViewErrorsAction = uiState.errors.isNotEmpty(),
+                scrollBehavior = scrollBehavior,
+            )
+        },
+        floatingActionButton = {
+            AnimatedScrollToTopFAB(
+                visible = torrentListState.showScrollTopButton,
+                onClick = { coroutineScope.launch { torrentListState.scrollToTop() } },
+            )
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+    ) { innerPadding ->
+        AnimatedContent(
+            modifier = Modifier.padding(innerPadding),
+            targetState = uiState.searchState,
+            contentKey = { it.getAnimationContentKey() },
+        ) { searchState ->
+            when (searchState) {
+                SearchState.Loading -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+
+                SearchState.InternetError -> {
+                    NoInternetConnectionState(
+                        modifier = Modifier.fillMaxSize(),
+                        onTryAgain = viewModel::search,
+                    )
+                }
+
+                SearchState.ResultsNotFound -> {
+                    ResultsNotFoundState(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = MaterialTheme.spaces.large),
+                        onNavigateToProviders = onNavigateToProviders,
+                        onTryAgain = viewModel::search,
+                        query = uiState.searchParams.query,
+                        category = uiState.searchParams.category,
+                    )
+                }
+
+                is SearchState.ResultsAvailable -> {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        AnimatedVisibility(
+                            modifier = Modifier.fillMaxWidth(),
+                            visible = searchState is SearchState.ResultsAvailable.Searching,
+                        ) {
+                            LinearProgressIndicator()
+                        }
+
+
+                        Column {
+                            AnimatedVisibility(visible = showSearchBar) {
+                                FilterSearchBar(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = MaterialTheme.spaces.large)
+                                        .padding(top = MaterialTheme.spaces.small),
+                                    textFieldState = textFieldState,
+                                    placeholder = { Text(stringResource(R.string.search_filter_query_hint)) },
+                                )
+                            }
+
+                            TorrentFilter(
+                                filter = uiState.torrentFilter,
+                                onToggleDeadTorrents = viewModel::toggleDeadTorrents,
+                                onToggleHideViewed = viewModel::toggleHideViewedTorrents,
+                                onToggleSearchProvider = viewModel::toggleSearchProviderResults,
+                                onSelectAllSearchProviders = viewModel::selectAllSearchProviders,
+                                onDeselectAllSearchProviders = viewModel::deselectAllSearchProviders,
+                                onInvertSearchProvidersSelection = viewModel::invertSearchProvidersSelection,
+                                onUpdateCategory = viewModel::updateCategoryFilter,
+                                enableSearchProvidersFilter =
+                                    searchState is SearchState.ResultsAvailable.Complete &&
+                                            uiState.torrentFilter.providers.isNotEmpty(),
+                                // Enable only when there is a chance of receiving mixed category results,
+                                // which is always the case when using `All`.
+                                enableCategoryFilter = uiState.searchParams.category == Category.All,
+                            )
+                        }
+
+                        TorrentList(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clipToBounds(),
+                            torrents = uiState.torrents,
+                            onTorrentClick = {
+                                selectedResult = it
+                                viewModel.markAsViewed(it.id)
+                            },
+                            searchQuery = uiState.searchParams.query,
+                            searchCategory = uiState.searchParams.category,
+                            searchErrorsCount = uiState.errors.size,
+                            onShowErrors = { showSearchErrors = true },
+                            isRefreshing = searchState is SearchState.ResultsAvailable.Refreshing,
+                            onRefresh = viewModel::refreshSearchResults,
+                            viewedTorrentIds = uiState.viewedTorrentIds,
+                            lazyListState = torrentListState.lazyListState,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun SearchState.getAnimationContentKey() = when (this) {
+    SearchState.InternetError -> SearchState.InternetError::class
+    SearchState.Loading -> SearchState.Loading::class
+    SearchState.ResultsNotFound -> SearchState.ResultsNotFound::class
+    is SearchState.ResultsAvailable -> SearchState.ResultsAvailable::class
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchScreenTopBar(
+    onNavigateBack: () -> Unit,
+    searchBarVisible: Boolean,
+    onToggleSearchBar: () -> Unit,
+    sortOptions: SortOptions,
+    onChangeSortCriteria: (SortCriteria) -> Unit,
+    onChangeSortOrder: (SortOrder) -> Unit,
+    onRefresh: () -> Unit,
+    onStopSearch: () -> Unit,
+    onShowSearchErrors: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    searchState: SearchState,
+    modifier: Modifier = Modifier,
+    enableSearchResultsAction: Boolean = true,
+    enableViewErrorsAction: Boolean = true,
+    scrollBehavior: TopAppBarScrollBehavior? = null,
+) {
+    var showSortOptions by rememberSaveable(sortOptions) { mutableStateOf(false) }
+    var showOverflowMenu by rememberSaveable { mutableStateOf(false) }
+
+    TopAppBar(
+        modifier = modifier,
+        navigationIcon = {
+            IconButton(onClick = onNavigateBack) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_arrow_back),
+                    contentDescription = null,
+                )
+            }
+        },
+        title = { Text(stringResource(R.string.search_screen_title)) },
+        actions = {
+            IconButton(
+                onClick = onToggleSearchBar,
+                enabled = enableSearchResultsAction,
+            ) {
+                val iconResId = if (searchBarVisible) {
+                    R.drawable.ic_search_off
+                } else {
+                    R.drawable.ic_search
+                }
+
+                Icon(
+                    painter = painterResource(iconResId),
+                    contentDescription = null,
+                )
+            }
+
+            Box {
+                IconButton(
+                    onClick = { showSortOptions = true },
+                    enabled = enableSearchResultsAction,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_sort),
+                        contentDescription = stringResource(R.string.action_sort),
+                    )
+                }
+                SortDropdownMenu(
+                    expanded = showSortOptions,
+                    onDismissRequest = { showSortOptions = false },
+                    currentCriteria = sortOptions.criteria,
+                    onChangeCriteria = onChangeSortCriteria,
+                    currentOrder = sortOptions.order,
+                    onChangeOrder = onChangeSortOrder,
+                )
+            }
+
+            Box {
+                IconButton(onClick = { showOverflowMenu = true }) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_more_vert),
+                        contentDescription = null,
+                    )
+                }
+                TopBarOverflowMenu(
+                    expanded = showOverflowMenu,
+                    onDismiss = { showOverflowMenu = false },
+                    onRefresh = onRefresh,
+                    onStopSearch = onStopSearch,
+                    onShowSearchErrors = onShowSearchErrors,
+                    onNavigateToSettings = onNavigateToSettings,
+                    searchState = searchState,
+                    enableViewErrorsAction = enableViewErrorsAction,
+                )
+            }
+        },
+        scrollBehavior = scrollBehavior,
+    )
+}
+
+@Composable
+private fun TopBarOverflowMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
+    onStopSearch: () -> Unit,
+    onShowSearchErrors: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    searchState: SearchState,
+    modifier: Modifier = Modifier,
+    enableViewErrorsAction: Boolean = true,
+) {
+    val refreshAction: @Composable (enable: Boolean) -> Unit = @Composable { enable ->
+        DropdownMenuItem(
+            onClick = {
+                onRefresh()
+                onDismiss()
+            },
+            leadingIcon = {
+                Icon(
+                    painter = painterResource(R.drawable.ic_refresh),
+                    contentDescription = null,
+                )
+            },
+            text = { Text(stringResource(R.string.search_action_refresh)) },
+            enabled = enable,
+        )
+    }
+    val stopSearchAction: @Composable (enable: Boolean) -> Unit = @Composable { enable ->
+        DropdownMenuItem(
+            onClick = {
+                onStopSearch()
+                onDismiss()
+            },
+            leadingIcon = {
+                Icon(
+                    painter = painterResource(R.drawable.ic_cancel),
+                    contentDescription = null,
+                )
+            },
+            text = { Text(stringResource(R.string.search_action_stop_search)) },
+            enabled = enable,
+        )
+    }
+    RoundedDropdownMenu(
+        modifier = modifier,
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+    ) {
+        Crossfade(searchState) { innerSearchState ->
+            when (innerSearchState) {
+                SearchState.Loading -> stopSearchAction(false)
+                SearchState.InternetError -> refreshAction(false)
+                SearchState.ResultsNotFound -> refreshAction(false)
+                SearchState.ResultsAvailable.Complete -> refreshAction(true)
+                SearchState.ResultsAvailable.Refreshing -> refreshAction(false)
+                SearchState.ResultsAvailable.Searching -> stopSearchAction(true)
+            }
+        }
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.search_action_view_errors)) },
+            onClick = {
+                onShowSearchErrors()
+                onDismiss()
+            },
+            leadingIcon = {
+                Icon(
+                    painter = painterResource(R.drawable.ic_error),
+                    contentDescription = null,
+                )
+            },
+            enabled = enableViewErrorsAction,
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.search_action_settings)) },
+            onClick = {
+                onNavigateToSettings()
+                onDismiss()
+            },
+            leadingIcon = {
+                Icon(
+                    painter = painterResource(R.drawable.ic_settings),
+                    contentDescription = null,
+                )
+            },
+        )
+    }
+}

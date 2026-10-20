@@ -1,0 +1,91 @@
+# torrent-engine settings
+# Loaded from (first hit wins):
+#   1) --config PATH
+#   2) %CD%\config.yaml   (current working directory)
+#   3) <exe-dir>\config.yaml
+
+bind: 127.0.0.1
+port: 17890
+data_dir: engine-data
+# ffmpeg_dir: python/etc
+
+session:
+  connections_limit: 500
+  active_downloads: 16
+  active_seeds: 16
+  active_limit: 32
+
+# Friend / 1-on-1 private sharing
+# Internet reachability = BitTorrent listen_port + public_host (not the HTTP API).
+share:
+  private_by_default: true
+  # Tailscale / LAN / public IP so magnets include x.pe=host:port
+  public_host: ""
+  # If public_host is empty, probe api.ipify.org once at startup
+  auto_detect_public_host: false
+  # Stable BitTorrent listen port (0 = ephemeral). Friends dial this (UDP+TCP).
+  listen_port: 6881
+  # manual | tailscale — tailscale: no WAN auto-detect; set public_host to Tailscale IP
+  profile: manual
+
+# Self-update (torrent-engine --check-update / --update)
+# Host update/manifest.json on HTTPS (GitHub Releases raw URL works).
+update:
+  manifest_url: ""
+  check_on_start: false
+  # Or: set TORRENT_ENGINE_UPDATE_URL=https://…/manifest.json
+
+# Live Cinema HLS (ffmpeg). Video filters force re-encode (no -c:v copy).
+hls:
+  audio_bitrate: "256k"
+  audio_channels: keep   # keep source layout; stereo forces a downmix
+  hls_time: 4
+  low_latency: true
+  loudnorm: false
+  deinterlace: auto        # auto | on | off
+  tonemap: auto            # auto | off | hable | mobius | reinhard (HDR→SDR only)
+  lut_cube: ""             # optional .cube path (applied after tonemap)
+  abr: false               # 360p/720p/1080p master playlist when true
+  burn_subs: false
+
+# Per-mode worker / peer profiles (omit a key to keep the built-in default)
+modes:
+  stream:
+    connections_limit: 400
+    active_downloads: 16
+    sequential: true
+    playhead_window_mb: 32
+    lookahead_mb: 96
+  general:
+    connections_limit: 200
+    active_downloads: 8
+  limited:
+    connections_limit: 40
+    active_downloads: 3
+    download_rate_kbps: 512
+    upload_rate_kbps: 64
+  fastest:
+    connections_limit: 800
+    active_downloads: 32
+    sequential: true
+    playhead_window_mb: 8
+  preview:
+    connections_limit: 80
+    active_downloads: 4
+    sequential: true
+    preview_head_mb: 16
+    preview_tail_mb: 2
+  seed:
+    connections_limit: 200
+  mirror:
+    connections_limit: 500
+    active_downloads: 20
+    sequential: true
+    playhead_window_mb: 16
+  selective:
+    connections_limit: 200
+  friend:
+    connections_limit: 20
+    active_downloads: 4
+    sequential: true
+    private_swarm: true

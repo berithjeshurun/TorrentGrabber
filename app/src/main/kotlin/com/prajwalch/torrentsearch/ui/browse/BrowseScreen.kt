@@ -1,0 +1,288 @@
+package com.prajwalch.torrentsearch.ui.browse
+
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.retain.retain
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+import com.prajwalch.torrentsearch.R
+import com.prajwalch.torrentsearch.domain.model.Torrent
+import com.prajwalch.torrentsearch.ui.browse.component.BrowseFilters
+import com.prajwalch.torrentsearch.ui.browse.component.TorrentList
+import com.prajwalch.torrentsearch.ui.browse.component.TorrentsUnavailableState
+import com.prajwalch.torrentsearch.ui.component.AnimatedScrollToTopFAB
+import com.prajwalch.torrentsearch.ui.component.FilterSearchBar
+import com.prajwalch.torrentsearch.ui.component.NoInternetConnectionState
+import com.prajwalch.torrentsearch.ui.component.TorrentClientNotFoundDialog
+import com.prajwalch.torrentsearch.ui.rememberTorrentListState
+import com.prajwalch.torrentsearch.ui.theme.spaces
+import com.prajwalch.torrentsearch.ui.torrentactions.TorrentActionsBottomSheet
+
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
+
+import org.koin.androidx.compose.koinViewModel
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BrowseScreen(
+    onNavigateBack: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    onNavigateToProviders: () -> Unit,
+    onNavigateToTorrentDetails: (id: String, url: String, providerName: String) -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: BrowseViewModel = koinViewModel(),
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val torrentListState = rememberTorrentListState(itemsCount = { uiState.torrents.size })
+
+    var showTorrentClientNotFoundDialog by rememberSaveable { mutableStateOf(false) }
+    if (showTorrentClientNotFoundDialog) {
+        TorrentClientNotFoundDialog(
+            onConfirmation = { showTorrentClientNotFoundDialog = false },
+        )
+    }
+
+    var selectedTorrent by retain { mutableStateOf<Torrent?>(null) }
+    selectedTorrent?.let { torrent ->
+        TorrentActionsBottomSheet(
+            onDismiss = { selectedTorrent = null },
+            torrent = torrent,
+            onTorrentClientNotFound = { showTorrentClientNotFoundDialog = true },
+            onNavigateToDetails = onNavigateToTorrentDetails,
+            onShowSnackBar = { message ->
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(message)
+                }
+            },
+        )
+    }
+
+    var showSearchBar by rememberSaveable { mutableStateOf(false) }
+    val textFieldState = rememberTextFieldState()
+
+    if (showSearchBar) {
+        LaunchedEffect(Unit) {
+            snapshotFlow { textFieldState.text }
+                .drop(1)
+                .collectLatest { viewModel.searchTorrents(it.toString()) }
+        }
+    }
+
+    Scaffold(
+        modifier = modifier
+            .fillMaxSize()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
+        topBar = {
+            BrowseScreenTopBar(
+                onNavigateBack = onNavigateBack,
+                searchBarVisible = showSearchBar,
+                onToggleSearchBar = { showSearchBar = !showSearchBar },
+                onNavigateToSettings = onNavigateToSettings,
+                enableSearchAction = uiState.contentState is BrowseContentState.Available,
+                scrollBehavior = scrollBehavior,
+            )
+        },
+        floatingActionButton = {
+            AnimatedScrollToTopFAB(
+                visible = torrentListState.showScrollTopButton,
+                onClick = { coroutineScope.launch { torrentListState.scrollToTop() } },
+            )
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize(),
+        ) {
+            AnimatedVisibility(
+                modifier = Modifier.fillMaxWidth(),
+                visible = uiState.contentState is BrowseContentState.Available.Searching,
+            ) {
+                LinearProgressIndicator()
+            }
+
+            Column {
+                AnimatedVisibility(visible = showSearchBar) {
+                    FilterSearchBar(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = MaterialTheme.spaces.large)
+                            .padding(top = MaterialTheme.spaces.small),
+                        textFieldState = textFieldState,
+                        placeholder = { Text(stringResource(R.string.browse_search_query_hint)) },
+                    )
+                }
+
+                val enableViewFilters = uiState.contentState is BrowseContentState.Available
+                BrowseFilters(
+                    sort = uiState.queryParams.sort,
+                    onChangeSort = viewModel::updateBrowseSort,
+                    category = uiState.queryParams.category,
+                    onChangeCategory = viewModel::updateCategory,
+                    deadTorrents = uiState.viewFilters.deadTorrents,
+                    onToggleDeadTorrents = viewModel::toggleDeadTorrents,
+                    hideViewed = uiState.viewFilters.hideViewed,
+                    onToggleHideViewed = viewModel::toggleHideViewed,
+                    providerOptions = uiState.viewFilters.providers,
+                    onToggleSearchProvider = viewModel::toggleSearchProviderResults,
+                    onSelectAllSearchProviders = viewModel::selectAllSearchProviders,
+                    onDeselectAllSearchProviders = viewModel::deselectAllSearchProviders,
+                    onInvertSearchProvidersSelection = viewModel::invertSearchProvidersSelection,
+                    enableDeadTorrents = enableViewFilters,
+                    enableHideViewed = enableViewFilters,
+                    enableSearchProvidersFilter = enableViewFilters,
+                    contentPadding = PaddingValues(horizontal = MaterialTheme.spaces.large),
+                )
+            }
+
+            AnimatedContent(
+                targetState = uiState.contentState,
+                contentKey = { it.getAnimationContentKey() },
+            ) { contentState ->
+                when (contentState) {
+                    BrowseContentState.Loading -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+
+                    BrowseContentState.InternetError -> {
+                        NoInternetConnectionState(
+                            modifier = Modifier.fillMaxSize(),
+                            onTryAgain = viewModel::loadTorrents,
+                        )
+                    }
+
+                    BrowseContentState.Unavailable -> {
+                        TorrentsUnavailableState(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = MaterialTheme.spaces.large),
+                            onNavigateToProviders = onNavigateToProviders,
+                            onTryAgain = viewModel::loadTorrents,
+                        )
+                    }
+
+                    is BrowseContentState.Available -> {
+                        TorrentList(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clipToBounds(),
+                            torrents = uiState.torrents,
+                            onTorrentClick = {
+                                selectedTorrent = it
+                                viewModel.markAsViewed(it.id)
+                            },
+                            isRefreshing = contentState is BrowseContentState.Available.Refreshing,
+                            onRefresh = viewModel::refreshTorrents,
+                            viewedTorrentIds = uiState.viewedTorrentIds,
+                            lazyListState = torrentListState.lazyListState,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun BrowseContentState.getAnimationContentKey() = when (this) {
+    BrowseContentState.InternetError -> BrowseContentState.InternetError::class
+    BrowseContentState.Loading -> BrowseContentState.Loading::class
+    BrowseContentState.Unavailable -> BrowseContentState.Unavailable::class
+    is BrowseContentState.Available -> BrowseContentState.Available::class
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BrowseScreenTopBar(
+    onNavigateBack: () -> Unit,
+    searchBarVisible: Boolean,
+    onToggleSearchBar: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+    enableSearchAction: Boolean = true,
+    scrollBehavior: TopAppBarScrollBehavior? = null,
+) {
+    TopAppBar(
+        modifier = modifier,
+        navigationIcon = {
+            IconButton(onClick = onNavigateBack) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_arrow_back),
+                    contentDescription = null,
+                )
+            }
+        },
+        title = { Text(stringResource(R.string.browse_screen_title)) },
+        actions = {
+            IconButton(
+                onClick = onToggleSearchBar,
+                enabled = enableSearchAction,
+            ) {
+                val iconResId = if (searchBarVisible) {
+                    R.drawable.ic_search_off
+                } else {
+                    R.drawable.ic_search
+                }
+
+                Icon(
+                    painter = painterResource(iconResId),
+                    contentDescription = null,
+                )
+            }
+
+            IconButton(onClick = onNavigateToSettings) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_settings),
+                    contentDescription = null,
+                )
+            }
+        },
+        scrollBehavior = scrollBehavior,
+    )
+}

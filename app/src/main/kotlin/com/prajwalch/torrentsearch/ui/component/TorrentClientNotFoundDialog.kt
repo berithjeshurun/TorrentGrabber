@@ -1,0 +1,258 @@
+package com.prajwalch.torrentsearch.ui.component
+
+import androidx.annotation.DrawableRes
+import androidx.annotation.StringRes
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+
+import com.prajwalch.torrentsearch.R
+import com.prajwalch.torrentsearch.ui.theme.spaces
+
+private val torrentClients = listOf(
+    TorrentClient(
+        name = R.string.torrent_client_libretorrent,
+        isRecommended = true,
+        sources = listOf(
+            Source(
+                logo = R.drawable.googleplay,
+                url = createPlayStoreUrl(packageId = "org.proninyaroslav.libretorrent")
+            ),
+            Source(
+                logo = R.drawable.fdroid,
+                url = createFDroidUrl(packageId = "org.proninyaroslav.libretorrent")
+            ),
+        )
+    ),
+    TorrentClient(
+        name = R.string.torrent_client_aria2,
+        sources = listOf(
+            Source(
+                logo = R.drawable.fdroid,
+                url = createFDroidUrl(packageId = "com.gianlu.aria2app"),
+            ),
+        )
+    ),
+    TorrentClient(
+        name = R.string.torrent_client_gopeed,
+        sources = listOf(
+            Source(
+                logo = R.drawable.github,
+                url = createGithubReleaseUrl(username = "GopeedLab", repo = "gopeed"),
+            ),
+        )
+    ),
+    TorrentClient(
+        name = R.string.torrent_client_pikatorrent,
+        sources = listOf(
+            Source(
+                logo = R.drawable.googleplay,
+                url = createPlayStoreUrl(packageId = "com.pikatorrent.PikaTorrent"),
+            ),
+            Source(
+                logo = R.drawable.github,
+                url = createGithubReleaseUrl(username = "G-Ray", repo = "pikatorrent"),
+            ),
+        )
+    ),
+    TorrentClient(
+        name = R.string.torrent_client_torrserve,
+        sources = listOf(
+            Source(
+                logo = R.drawable.fdroid,
+                url = createFDroidUrl(packageId = "ru.yourok.torrserve"),
+            ),
+        )
+    ),
+)
+
+private data class TorrentClient(
+    @param:StringRes
+    val name: Int,
+    val isRecommended: Boolean = false,
+    val sources: List<Source> = emptyList(),
+)
+
+private data class Source(
+    @param:DrawableRes
+    val logo: Int,
+    val url: String,
+)
+
+@Composable
+fun TorrentClientNotFoundDialog(
+    onConfirmation: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AlertDialog(
+        modifier = modifier,
+        onDismissRequest = onConfirmation,
+        confirmButton = {
+            TextButton(onClick = onConfirmation) {
+                Text(stringResource(R.string.button_done))
+            }
+        },
+        icon = { DialogLeadingIcon() },
+        title = { DialogTitle() },
+        text = { DialogContent() },
+    )
+}
+
+@Composable
+private fun DialogLeadingIcon(modifier: Modifier = Modifier) {
+    Icon(
+        modifier = modifier,
+        painter = painterResource(R.drawable.ic_info),
+        contentDescription = null,
+    )
+}
+
+@Composable
+private fun DialogTitle(modifier: Modifier = Modifier) {
+    Text(
+        modifier = modifier,
+        text = stringResource(R.string.torrent_client_not_found_title)
+    )
+}
+
+@Composable
+private fun DialogContent(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(
+            space = MaterialTheme.spaces.extraLarge,
+        ),
+    ) {
+        Text(stringResource(R.string.torrent_client_not_found_content))
+
+        val baseRoundedShape = MaterialTheme.shapes.large
+        val rectangleShape = RectangleShape
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(MaterialTheme.spaces.extraSmall)) {
+            itemsIndexed(items = torrentClients) { index, client ->
+                val shape = when (index) {
+                    0 -> baseRoundedShape.copy(
+                        bottomStart = CornerSize(0.dp),
+                        bottomEnd = CornerSize(0.dp),
+                    )
+
+                    torrentClients.lastIndex -> baseRoundedShape.copy(
+                        topStart = CornerSize(0.dp),
+                        topEnd = CornerSize(0.dp),
+                    )
+
+                    else -> rectangleShape
+                }
+
+                TorrentClientListItem(
+                    modifier = modifier,
+                    client = client,
+                    shape = shape,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TorrentClientListItem(
+    client: TorrentClient,
+    shape: Shape,
+    modifier: Modifier = Modifier,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+
+    val primaryColors = ListItemDefaults.colors(
+        containerColor = colorScheme.primaryContainer,
+        headlineColor = colorScheme.onPrimaryContainer,
+        supportingColor = colorScheme.onPrimaryContainer.copy(alpha = 0.6f),
+        trailingIconColor = colorScheme.onPrimaryContainer,
+    )
+    val secondaryColors = ListItemDefaults.colors(
+        containerColor = colorScheme.secondaryContainer,
+        headlineColor = colorScheme.onSecondaryContainer,
+        trailingIconColor = colorScheme.onSecondaryContainer,
+    )
+    val listItemColors = if (client.isRecommended) {
+        primaryColors
+    } else {
+        secondaryColors
+    }
+
+    ListItem(
+        modifier = Modifier
+            .clip(shape = shape)
+            .height(60.dp)
+            .then(modifier),
+        headlineContent = {
+            Text(
+                text = stringResource(client.name),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        supportingContent = {
+            if (client.isRecommended) {
+                Text(
+                    text = stringResource(R.string.torrent_client_not_found_recommended_client_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        trailingContent = { TorrentClientSourcesRow(sources = client.sources) },
+        colors = listItemColors,
+    )
+}
+
+@Composable
+private fun TorrentClientSourcesRow(sources: List<Source>, modifier: Modifier = Modifier) {
+    val uriHandler = LocalUriHandler.current
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        sources.forEach {
+            IconButton(onClick = { uriHandler.openUri(it.url) }) {
+                Icon(
+                    painter = painterResource(it.logo),
+                    contentDescription = null,
+                )
+            }
+        }
+    }
+}
+
+private fun createFDroidUrl(packageId: String): String {
+    return "https://f-droid.org/en/packages/$packageId"
+}
+
+private fun createGithubReleaseUrl(username: String, repo: String): String {
+    return "https://github.com/$username/$repo/releases"
+}
+
+private fun createPlayStoreUrl(packageId: String): String {
+    return "https://play.google.com/store/apps/details?id=$packageId"
+}

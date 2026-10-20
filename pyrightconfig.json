@@ -1,0 +1,16 @@
+{
+  "include": [
+    "*.py",
+    "python"
+  ],
+  "extraPaths": [
+    "python"
+  ],
+  "pythonVersion": "3.11",
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": ["python"]
+    }
+  ]
+}

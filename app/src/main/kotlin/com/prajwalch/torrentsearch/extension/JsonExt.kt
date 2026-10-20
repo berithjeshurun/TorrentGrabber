@@ -1,0 +1,44 @@
+package com.prajwalch.torrentsearch.extension
+
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
+
+/** Returns the value of a given key as a [JsonArray]. */
+fun JsonObject.getArray(key: String): JsonArray? = this[key]?.asArray()
+
+/** Returns the value of a given key as a [JsonObject]. */
+fun JsonObject.getObject(key: String): JsonObject? = this[key]?.asObject()
+
+/** Returns the value of a given key as a [String]. */
+fun JsonObject.getString(key: String): String? = this[key]?.asString()
+
+/** Returns the value of a given key as an [UInt]. */
+fun JsonObject.getUInt(key: String): UInt? = this[key]?.asUInt()
+
+/** Returns the value of a given key as a [Long]. */
+fun JsonObject.getLong(key: String): Long? = this[key]?.asLong()
+
+/** Returns the JSON element as a [JsonArray]. */
+fun JsonElement.asArray(): JsonArray = this.jsonArray
+
+/** Returns the JSON element as a [JsonObject]. */
+fun JsonElement.asObject(): JsonObject = this.jsonObject
+
+/** Returns the JSON element as string, or null if the element is JsonNull. */
+fun JsonElement.asString(): String? = this.jsonPrimitive.contentOrNull
+
+/** Returns the JSON element as [Int]. */
+fun JsonElement.asInt(): Int = this.jsonPrimitive.int
+
+/** Returns the JSON element as [UInt]. */
+fun JsonElement.asUInt(): UInt = this.asInt().toUInt()
+
+/** Returns the JSON element as [Long]. */
+fun JsonElement.asLong(): Long = this.jsonPrimitive.long

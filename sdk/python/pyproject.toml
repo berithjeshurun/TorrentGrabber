@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torrent-engine-sdk"
+version = "0.1.0"
+description = "Thin HTTP client for the torrent-engine C++ sidecar (any app)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+dependencies = [
+  "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+async = ["httpx>=0.27.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["torrent_engine*"]

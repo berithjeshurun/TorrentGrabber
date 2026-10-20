@@ -1,0 +1,82 @@
+# IDE / OS
+*.iml
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+.kotlin/
+local.properties
+.gradle/
+/build
+/captures
+.externalNativeBuild
+.cxx
+
+# Python
+python/**/__pycache__/
+python/**/*.py[cod]
+python/.venv/
+python/venv/
+python/**/*.egg-info/
+python/dist/
+python/build/
+python/*.db
+python/*.db-*
+python/results.json
+python/.pytest_cache/
+python/data/
+**/.pytest_cache/
+
+# Engine build & runtime
+engine/build/
+engine/dist/
+engine-data/
+engine-data-smoke/
+engine-data-probe-*.txt
+*.pdb
+*.ilk
+*.obj
+
+# Bundled binaries (download locally / via release zip)
+python/etc/*.exe
+python/etc/*.dll
+
+# Local DBs / probes
+*.db
+*.db-shm
+*.db-wal
+torrentsearch.db
+torrentsearch.db-shm
+torrentsearch.db-wal
+/engine-data-probe-err.txt
+/engine-data-probe-out.txt
+engine-data-probe-*.txt
+
+# Do not commit large media / torrents
+*.mkv
+*.mp4
+*.avi
+*.torrent
+*.part
+
+# Full vcpkg tree is huge — bootstrap locally (see engine/README.md)
+tools/vcpkg/
+
+# Node
+**/node_modules/
+npm-debug.log*
+
+# Secrets / local env
+.env
+.env.*
+*.pem
+credentials.json
+
+# SDK local
+sdk/python/*.egg-info/
+sdk/python/build/
+sdk/javascript/node_modules/
+
+# Update staging
+.update-staging/
+**/apply_update.bat

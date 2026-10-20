@@ -1,0 +1,40 @@
+package com.prajwalch.torrentsearch.util
+
+import android.content.Context
+import android.content.Intent
+import android.util.Log
+
+import com.prajwalch.torrentsearch.BuildConfig
+
+class TorrentSearchExceptionHandler(
+    private val context: Context,
+    private val activityToLaunch: Class<*>,
+) : Thread.UncaughtExceptionHandler {
+    private val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+
+    override fun uncaughtException(thread: Thread, exception: Throwable) {
+        Log.e(TAG, "Application crashed!", exception)
+
+        startGivenActivity(exception)
+        defaultHandler?.uncaughtException(thread, exception)
+    }
+
+    private fun startGivenActivity(exception: Throwable) {
+        val targetActivityIntent = Intent(context, activityToLaunch)
+        val restartIntent = Intent.makeRestartActivityTask(targetActivityIntent.component)
+            .apply {
+                putExtra(EXTRA_CRASH_STACKTRACE, exception.stackTraceToString())
+            }
+
+        context.startActivity(restartIntent)
+        Log.d(TAG, "${activityToLaunch.simpleName} started successfully")
+    }
+
+    companion object {
+        private const val TAG = "TorrentSearchExceptionHandler"
+        private const val EXTRA_CRASH_STACKTRACE = "${BuildConfig.APPLICATION_ID}.CRASH_STACKTRACE"
+
+        fun getCrashStackTrace(intent: Intent): String? =
+            intent.getStringExtra(EXTRA_CRASH_STACKTRACE)
+    }
+}

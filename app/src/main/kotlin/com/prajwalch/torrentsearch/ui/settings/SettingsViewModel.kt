@@ -1,0 +1,281 @@
+package com.prajwalch.torrentsearch.ui.settings
+
+import android.content.ComponentName
+import android.content.pm.PackageManager
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+
+import com.prajwalch.torrentsearch.BuildConfig
+import com.prajwalch.torrentsearch.data.repository.SettingsRepository
+import com.prajwalch.torrentsearch.data.repository.ViewedTorrentRepository
+import com.prajwalch.torrentsearch.domain.SearchProviderManager
+import com.prajwalch.torrentsearch.domain.model.DarkTheme
+import com.prajwalch.torrentsearch.domain.model.DohProvider
+import com.prajwalch.torrentsearch.domain.model.MaxNumResults
+import com.prajwalch.torrentsearch.domain.model.SortOptions
+import com.prajwalch.torrentsearch.util.LogsUtils
+
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.WhileSubscribed
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+import org.koin.core.annotation.KoinViewModel
+import java.io.OutputStream
+import kotlin.time.Duration.Companion.seconds
+
+data class SettingsUiState(
+    val appearanceSettings: AppearanceSettingsUiState = AppearanceSettingsUiState(),
+    val generalSettings: GeneralSettingsUiState = GeneralSettingsUiState(),
+    val contentAndPrivacySettings: ContentAndPrivacySettingsUiState = ContentAndPrivacySettingsUiState(),
+    val searchSettings: SearchSettingsUiState = SearchSettingsUiState(),
+    val networkSettings: NetworkSettingsUiState = NetworkSettingsUiState(),
+)
+
+data class AppearanceSettingsUiState(
+    val enableDynamicTheme: Boolean = true,
+    val darkTheme: DarkTheme = DarkTheme.FollowSystem,
+    val pureBlack: Boolean = false,
+)
+
+data class GeneralSettingsUiState(
+    val openTorrentDetailsInApp: Boolean = true,
+    val enableShareIntegration: Boolean = true,
+    val enableQuickSearch: Boolean = true,
+)
+
+data class ContentAndPrivacySettingsUiState(
+    val enableNSFWMode: Boolean = false,
+    val blurNSFWImages: Boolean = true,
+    val saveSearchHistory: Boolean = true,
+    val showSearchHistory: Boolean = true,
+    val showRecentSearches: Boolean = false,
+    val viewedTorrentsCount: Int = 0,
+)
+
+data class SearchSettingsUiState(
+    val searchProvidersStat: SearchProvidersStat = SearchProvidersStat(),
+    val defaultSortOptions: SortOptions = SortOptions(),
+    val maxNumResults: MaxNumResults = MaxNumResults.Unlimited,
+) {
+    data class SearchProvidersStat(
+        val enabledSearchProvidersCount: Int = 0,
+        val totalSearchProvidersCount: Int = 0,
+    )
+}
+
+data class NetworkSettingsUiState(
+    val dohProvider: DohProvider = DohProvider.Default,
+    val checkProvidersOnStartup: Boolean = true,
+)
+
+/** ViewModel that handles the business logic of Settings screen. */
+@KoinViewModel
+class SettingsViewModel(
+    private val settingsRepository: SettingsRepository,
+    private val searchProvidersManager: SearchProviderManager,
+    private val viewedTorrentRepository: ViewedTorrentRepository,
+) : ViewModel() {
+    val uiState = combine(
+        settingsRepository.getAppearanceSettings(),
+        settingsRepository.getGeneralSettings(),
+        getContentAndPrivacySettings(settingsRepository, viewedTorrentRepository),
+        getSearchSettings(settingsRepository, searchProvidersManager),
+        settingsRepository.getNetworkSettings(),
+        ::SettingsUiState,
+    ).stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5.seconds),
+        initialValue = SettingsUiState(),
+    )
+
+    fun enableDynamicTheme(enable: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.enableDynamicTheme(enable = enable)
+        }
+    }
+
+    fun setDarkTheme(darkTheme: DarkTheme) {
+        viewModelScope.launch {
+            settingsRepository.setDarkTheme(darkTheme = darkTheme)
+        }
+    }
+
+    fun enablePureBlackTheme(enable: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.enablePureBlack(enable = enable)
+        }
+    }
+
+    fun enableNSFWMode(enable: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.enableNSFWMode(enable = enable)
+            if (!enable) searchProvidersManager.disableUnsafeProviders()
+        }
+    }
+
+    fun enableBlurNSFWImages(enable: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.enableBlurNSFWImages(enable)
+        }
+    }
+
+    fun clearViewedTorrents() {
+        viewModelScope.launch {
+            viewedTorrentRepository.clearAll()
+        }
+    }
+
+    fun enableSaveSearchHistory(save: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.enableSaveSearchHistory(enable = save)
+        }
+    }
+
+    fun enableShowSearchHistory(show: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.enableShowSearchHistory(show = show)
+        }
+    }
+
+    fun enableShowRecentSearches(enable: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.enableShowRecentSearches(enable)
+        }
+    }
+
+    fun setMaxNumResults(maxNumResults: MaxNumResults) {
+        viewModelScope.launch {
+            settingsRepository.setMaxNumResults(maxNumResults = maxNumResults)
+        }
+    }
+
+    fun enableOpenTorrentDetailsInApp(enable: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.enableOpenTorrentDetailsInApp(enable)
+        }
+    }
+
+    fun enableShareIntegration(enable: Boolean, packageManager: PackageManager) {
+        viewModelScope.launch {
+            enableIntentIntegration(
+                enable = enable,
+                packageManager = packageManager,
+                activityAliasName = ".SendAlias",
+            )
+            settingsRepository.enableShareIntegration(enable = enable)
+        }
+    }
+
+    fun enableQuickSearch(enable: Boolean, packageManager: PackageManager) {
+        viewModelScope.launch {
+            enableIntentIntegration(
+                enable = enable,
+                packageManager = packageManager,
+                activityAliasName = ".ProcessTextAlias",
+            )
+            settingsRepository.enableQuickSearch(enable = enable)
+        }
+    }
+
+    private fun enableIntentIntegration(
+        enable: Boolean,
+        packageManager: PackageManager,
+        activityAliasName: String,
+    ) {
+        val packageName = BuildConfig.APPLICATION_ID
+        val componentName = ComponentName(packageName, "$packageName$activityAliasName")
+
+        val componentEnabledState = if (enable) {
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+        } else {
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        }
+
+        packageManager.setComponentEnabledSetting(
+            componentName,
+            componentEnabledState,
+            PackageManager.DONT_KILL_APP,
+        )
+    }
+
+    fun setDohProvider(provider: DohProvider) {
+        viewModelScope.launch {
+            settingsRepository.setDohProvider(provider)
+        }
+    }
+
+    fun enableCheckProvidersOnStartup(enable: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.enableCheckProvidersOnStartup(enable)
+        }
+    }
+
+    fun exportLogs(outputStream: OutputStream) {
+        viewModelScope.launch {
+            LogsUtils.exportLogsToOutputStream(outputStream = outputStream)
+        }
+    }
+}
+
+private fun SettingsRepository.getAppearanceSettings() =
+    combine(
+        enableDynamicTheme,
+        darkTheme,
+        pureBlack,
+        ::AppearanceSettingsUiState,
+    )
+
+private fun SettingsRepository.getGeneralSettings() =
+    combine(
+        openTorrentDetailsInApp,
+        enableShareIntegration,
+        enableQuickSearch,
+        ::GeneralSettingsUiState,
+    )
+
+private fun getContentAndPrivacySettings(
+    settingsRepository: SettingsRepository,
+    viewedTorrentRepository: ViewedTorrentRepository,
+): Flow<ContentAndPrivacySettingsUiState> =
+    combine(
+        settingsRepository.enableNSFWMode,
+        settingsRepository.blurNSFWImages,
+        settingsRepository.saveSearchHistory,
+        settingsRepository.showSearchHistory,
+        settingsRepository.showRecentSearches,
+        viewedTorrentRepository.getViewedTorrentsCount(),
+    ) { args: Array<Any> ->
+        ContentAndPrivacySettingsUiState(
+            enableNSFWMode = args[0] as Boolean,
+            blurNSFWImages = args[1] as Boolean,
+            saveSearchHistory = args[2] as Boolean,
+            showSearchHistory = args[3] as Boolean,
+            showRecentSearches = args[4] as Boolean,
+            viewedTorrentsCount = args[5] as Int,
+        )
+    }
+
+private fun getSearchSettings(
+    settingsRepository: SettingsRepository,
+    searchProvidersManager: SearchProviderManager,
+): Flow<SearchSettingsUiState> {
+    val searchProvidersStat = combine(
+        searchProvidersManager.getEnabledProvidersCount(),
+        searchProvidersManager.getProvidersCount(),
+        SearchSettingsUiState::SearchProvidersStat,
+    )
+
+    return combine(
+        searchProvidersStat,
+        settingsRepository.defaultSortOptions,
+        settingsRepository.maxNumResults,
+        ::SearchSettingsUiState,
+    )
+}
+
+private fun SettingsRepository.getNetworkSettings() =
+    combine(dohProvider, checkProvidersOnStartup, ::NetworkSettingsUiState)

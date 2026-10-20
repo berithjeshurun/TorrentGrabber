@@ -1,0 +1,103 @@
+package com.prajwalch.torrentsearch.ui.component
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.dp
+
+import com.prajwalch.torrentsearch.R
+import com.prajwalch.torrentsearch.domain.model.SortCriteria
+import com.prajwalch.torrentsearch.domain.model.SortOrder
+import com.prajwalch.torrentsearch.ui.sortCriteriaStringResource
+import com.prajwalch.torrentsearch.ui.sortOrderStringResource
+import com.prajwalch.torrentsearch.ui.theme.spaces
+
+@Composable
+fun RoundedDropdownMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    offset: DpOffset = DpOffset(0.dp, 0.dp),
+    scrollState: ScrollState = rememberScrollState(),
+    shape: Shape = MaterialTheme.shapes.medium,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    tonalElevation: Dp = MenuDefaults.TonalElevation,
+    shadowElevation: Dp = MenuDefaults.ShadowElevation,
+    border: BorderStroke? = null,
+    content: @Composable (ColumnScope.() -> Unit),
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        modifier = modifier,
+        offset = offset,
+        scrollState = scrollState,
+        shape = shape,
+        containerColor = containerColor,
+        tonalElevation = tonalElevation,
+        shadowElevation = shadowElevation,
+        border = border,
+        content = content,
+    )
+}
+
+@Composable
+fun SortDropdownMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    currentCriteria: SortCriteria,
+    onChangeCriteria: (SortCriteria) -> Unit,
+    currentOrder: SortOrder,
+    onChangeOrder: (SortOrder) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val checkIcon: @Composable () -> Unit = @Composable {
+        Icon(
+            painter = painterResource(R.drawable.ic_check),
+            contentDescription = null,
+        )
+    }
+
+    RoundedDropdownMenu(
+        modifier = modifier,
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+    ) {
+        for (criteria in SortCriteria.entries) {
+            DropdownMenuItem(
+                text = { Text(text = sortCriteriaStringResource(criteria)) },
+                onClick = { onChangeCriteria(criteria) },
+                trailingIcon = { if (criteria == currentCriteria) checkIcon() },
+            )
+        }
+
+        Spacer(Modifier.height(MaterialTheme.spaces.small))
+        HorizontalDivider()
+        Spacer(Modifier.height(MaterialTheme.spaces.small))
+
+        for (order in SortOrder.entries) {
+            DropdownMenuItem(
+                text = { Text(text = sortOrderStringResource(order)) },
+                onClick = { onChangeOrder(order) },
+                trailingIcon = { if (order == currentOrder) checkIcon() },
+            )
+        }
+    }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "@torrentgrabber/engine-sdk",
+  "version": "0.1.0",
+  "description": "Thin HTTP client for the torrent-engine C++ sidecar",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "default": "./index.js"
+    }
+  },
+  "license": "GPL-3.0-or-later",
+  "engines": {
+    "node": ">=18"
+  }
+}

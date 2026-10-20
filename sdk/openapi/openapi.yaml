@@ -1,0 +1,638 @@
+openapi: 3.0.3
+info:
+  title: torrent-engine
+  version: 0.1.0
+  description: |
+    Headless C++/libtorrent streaming & download sidecar.
+    HTTP API is local control only (default bind 127.0.0.1).
+    Friend share over the internet uses the BitTorrent listen port
+    (`share.listen_port` + `share.public_host` / magnet `x.pe`), not this HTTP API.
+servers:
+  - url: http://127.0.0.1:{port}
+    variables:
+      port:
+        default: "17890"
+paths:
+  /v1/health:
+    get:
+      summary: Health + session snapshot
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  name: { type: string }
+                  version: { type: string }
+                  session: { $ref: "#/components/schemas/Session" }
+                  metrics:
+                    type: object
+                    properties:
+                      hls_starts: { type: integer }
+                      hls_gate_rejects: { type: integer }
+                      hls_errors: { type: integer }
+  /v1/version:
+    get:
+      summary: Engine / OpenAPI / SDK compat versions
+      responses:
+        "200":
+          description: OK
+  /v1/update/check:
+    get:
+      summary: Check update manifest (does not install)
+      responses:
+        "200":
+          description: Manifest reachable
+        "503":
+          description: Manifest missing or unreachable
+  /v1/metrics:
+    get:
+      summary: Prometheus metrics (HLS starts, gate rejects, errors, piece waits, underruns)
+      responses:
+        "200":
+          description: text/plain OpenMetrics
+  /v1/metrics.json:
+    get:
+      summary: JSON metrics snapshot for WebSocket / UI
+      responses:
+        "200":
+          description: application/json
+  /v1/playlist.m3u:
+    get:
+      summary: Session M3U of active media URLs
+      responses:
+        "200":
+          description: audio/x-mpegurl
+  /v1/session:
+    get:
+      summary: Session / dial info for friend share
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+  /v1/share:
+    post:
+      summary: Create private torrent and seed a local path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string, description: Local file or directory }
+                private: { type: boolean, default: true }
+                name: { type: string }
+                comment: { type: string }
+                id: { type: string }
+      responses:
+        "200":
+          description: Seeding
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareResult"
+        "400":
+          description: Bad request
+        "502":
+          description: Share failed
+  /v1/torrents:
+    get:
+      summary: List torrents
+      responses:
+        "200":
+          description: Array of torrent jobs
+    post:
+      summary: Add magnet, local .torrent path, or http(s) .torrent URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [magnet]
+              properties:
+                magnet:
+                  type: string
+                  description: magnet: URI, local .torrent path, or http(s) URL to a .torrent
+                magnet_or_url: { type: string }
+                mode:
+                  type: string
+                  enum: [general, stream, limited, fastest, preview, selective, seed, mirror, friend]
+                  default: general
+                preset: { type: string }
+                file_indexes:
+                  type: array
+                  items: { type: integer }
+                peers:
+                  type: array
+                  items:
+                    oneOf:
+                      - type: string
+                        description: "ip:port"
+                      - type: object
+                        properties:
+                          ip: { type: string }
+                          port: { type: integer }
+                id: { type: string }
+      responses:
+        "200":
+          description: Added
+        "400":
+          description: Bad request
+        "502":
+          description: Add failed
+  /v1/torrents/{id}:
+    get:
+      summary: Torrent status
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200":
+          description: Status
+        "404":
+          description: Not found
+    delete:
+      summary: Remove torrent
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+        - name: delete_files
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Removed
+  /v1/torrents/{id}/pause:
+    post:
+      summary: Pause
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+  /v1/torrents/{id}/resume:
+    post:
+      summary: Resume
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+  /v1/torrents/{id}/peers:
+    post:
+      summary: Direct-dial a peer (friend mode)
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ip, port]
+              properties:
+                ip: { type: string }
+                port: { type: integer }
+      responses:
+        "200": { description: Peer connect requested }
+        "400": { description: Bad request }
+        "404": { description: Not found }
+  /v1/torrents/{id}/torrent:
+    get:
+      summary: Download .torrent bytes (share jobs)
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200":
+          description: application/x-bittorrent
+        "404":
+          description: No torrent file
+  /v1/torrents/{id}/playhead:
+    post:
+      summary: Set streaming playhead offset
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                offset_bytes: { type: integer, format: int64 }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+  /v1/torrents/{id}/media:
+    get:
+      summary: HTTP Range media bytes
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200": { description: Full body }
+        "206": { description: Partial content }
+        "404": { description: Not found }
+  /v1/torrents/{id}/tracks:
+    get:
+      summary: ffprobe tracks JSON
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200": { description: Tracks }
+        "404": { description: Not found }
+  /v1/torrents/{id}/media-file:
+    post:
+      summary: Select which torrent file is the media source
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [index]
+              properties:
+                index: { type: integer }
+      responses:
+        "200": { description: Media file selected }
+        "404": { description: Not found }
+  /v1/torrents/{id}/playlist.m3u:
+    get:
+      summary: M3U playlist pointing at /media for this torrent
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200": { description: audio/x-mpegurl }
+  /v1/torrents/{id}/hls:
+    post:
+      summary: Start live ffmpeg HLS (Cinema pipeline)
+      description: |
+        Starts or restarts HLS. Sequential readiness gate returns 503 with
+        `retry: true`, `reason`, `sequential_bytes` until enough contiguous data.
+        Pipeable containers (MKV/AVI/TS) use piece-waited stdin → ffmpeg.
+        Filters (tonemap, yadif, lut3d, loudnorm, burn-in, ABR, seek)
+        force video transcode. Query params and JSON body are both accepted.
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+        - name: audio
+          in: query
+          schema: { type: integer }
+        - name: start_seconds
+          in: query
+          schema: { type: number }
+          description: Restart encode from this time (-ss) for far seeks
+        - name: audio_only
+          in: query
+          schema: { type: boolean }
+        - name: burn_subtitle
+          in: query
+          schema: { type: integer }
+          description: Absolute stream index to burn in (PGS/VobSub)
+        - name: audio_bitrate
+          in: query
+          schema: { type: string, example: "256k" }
+        - name: audio_channels
+          in: query
+          schema: { type: string, enum: [stereo, keep] }
+        - name: loudnorm
+          in: query
+          schema: { type: boolean }
+        - name: deinterlace
+          in: query
+          schema: { type: string, enum: [auto, on, off] }
+        - name: tonemap
+          in: query
+          schema: { type: string, enum: [auto, off, hable, mobius, reinhard] }
+        - name: lut_cube
+          in: query
+          schema: { type: string }
+          description: Path to .cube LUT (after HDR→SDR tonemap)
+        - name: abr
+          in: query
+          schema: { type: boolean }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                audio: { type: integer }
+                start_seconds: { type: number }
+                audio_only: { type: boolean }
+                burn_subtitle: { type: integer }
+                audio_bitrate: { type: string }
+                audio_channels: { type: string }
+                loudnorm: { type: boolean }
+                deinterlace: { type: string }
+                tonemap: { type: string }
+                lut_cube: { type: string }
+                abr: { type: boolean }
+      responses:
+        "200": { description: HLS started }
+        "503":
+          description: Not ready — retry (sequential_bytes / container gate)
+        "502": { description: ffmpeg failed }
+  /v1/torrents/{id}/poster:
+    post:
+      summary: Extract cover frame at ~10% duration
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200": { description: Poster ready }
+  /v1/torrents/{id}/poster.jpg:
+    get:
+      summary: Cached poster JPEG
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200": { description: image/jpeg }
+        "404": { description: Not ready }
+  /v1/torrents/{id}/thumbs:
+    post:
+      summary: Build scrub sprite + WebVTT index
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+        - name: interval
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        "200": { description: Thumbs ready }
+  /v1/torrents/{id}/thumbs/{file}:
+    get:
+      summary: Sprite JPEG or thumbs.vtt
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+        - name: file
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: File }
+  /v1/torrents/{id}/subtitle:
+    post:
+      summary: Extract soft subtitle to WebVTT
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+        - name: index
+          in: query
+          schema: { type: integer }
+      responses:
+        "200": { description: Subtitle ready }
+        "404": { description: Not found }
+  /v1/torrents/{id}/hls/{file}:
+    get:
+      summary: HLS playlist / segment / VTT (single segment)
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+        - name: file
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: File }
+        "404": { description: Not found }
+  /v1/torrents/{id}/hls/{dir}/{file}:
+    get:
+      summary: ABR variant playlist / segment
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+        - name: dir
+          in: path
+          required: true
+          schema: { type: string }
+        - name: file
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: File }
+        "404": { description: Not found }
+  /v1/torrents/{id}/clip:
+    post:
+      summary: Export a time-range clip (MP4/MKV)
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [start, end]
+              properties:
+                start: { type: number }
+                end: { type: number }
+                container: { type: string, enum: [mp4, mkv], default: mp4 }
+      responses:
+        "200": { description: Clip ready }
+  /v1/torrents/{id}/remux:
+    post:
+      summary: Remux / strip to selected tracks
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                container: { type: string, enum: [mp4, mkv] }
+                video: { type: integer, nullable: true }
+                audio: { type: integer, nullable: true }
+                subtitle: { type: integer, nullable: true }
+      responses:
+        "200": { description: Remux ready }
+  /v1/torrents/{id}/cast:
+    post:
+      summary: Cast-friendly H.264+AAC export
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+        - name: profile
+          in: query
+          schema: { type: string, enum: [chromecast, airplay], default: chromecast }
+      responses:
+        "200": { description: Cast MP4 ready }
+  /v1/torrents/{id}/waveform:
+    post:
+      summary: Waveform JSON/PNG via audiowaveform + silence regions
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200": { description: Waveform + silences }
+  /v1/torrents/{id}/chapters:
+    post:
+      summary: Scene-detect chapter markers
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+        - name: threshold
+          in: query
+          schema: { type: number, default: 0.35 }
+      responses:
+        "200": { description: Chapters JSON }
+  /v1/torrents/{id}/exports/{file}:
+    get:
+      summary: Download an exported file
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+        - name: file
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: File bytes }
+        "404": { description: Not found }
+  /v1/torrents/{id}/buffer:
+    get:
+      summary: Buffer health / underrun vs playhead windows
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200": { description: Buffer snapshot }
+  /v1/torrents/{id}/boost:
+    post:
+      summary: Temporarily expand lookahead (boost ahead)
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                duration: { type: number, default: 45 }
+                multiplier: { type: number, default: 3 }
+      responses:
+        "200": { description: Boost active }
+  /v1/torrents/{id}/abr:
+    post:
+      summary: Set preferred ABR height (0=auto); clients honor via hls.js
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                height: { type: integer, default: 0 }
+      responses:
+        "200": { description: Preference stored }
+  /v1/torrents/{id}/invite:
+    get:
+      summary: Friend invite payload (magnet, dial_endpoint, qr_text, deep_link)
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200": { description: Invite JSON for QR / 3rd-party share }
+  /v1/torrents/{id}/cast/session:
+    post:
+      summary: One-tap cast session (export or HLS) with tokenized cast_url
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode: { type: string, enum: [export, hls] }
+                profile: { type: string, enum: [chromecast, airplay] }
+      responses:
+        "200": { description: cast_url + token }
+  /v1/party:
+    post:
+      summary: Create watch-party room (shared clock; BT data plane)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [magnet]
+              properties:
+                magnet: { type: string }
+                host_peer: { type: string }
+                torrent_id: { type: string }
+                id: { type: string }
+      responses:
+        "200": { description: Room created }
+    get:
+      summary: List party rooms
+      responses:
+        "200": { description: parties array }
+  /v1/party/{id}:
+    get:
+      summary: Get party clock state
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Room }
+    delete:
+      summary: Delete party room
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: deleted }
+  /v1/party/{id}/sync:
+    post:
+      summary: Push shared playback clock
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                position_sec: { type: number }
+                paused: { type: boolean }
+                who: { type: string }
+      responses:
+        "200": { description: Updated room }
+components:
+  parameters:
+    TorrentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+  schemas:
+    Session:
+      type: object
+      properties:
+        torrents: { type: integer }
+        data_dir: { type: string }
+        listen_port: { type: integer, description: BitTorrent listen port }
+        public_host: { type: string, nullable: true }
+        dial_endpoint:
+          type: string
+          nullable: true
+          description: "public_host:listen_port for friend dial / x.pe"
+        internet_share: { type: object }
+        config: { type: string }
+    ShareResult:
+      type: object
+      properties:
+        id: { type: string }
+        magnet: { type: string }
+        private: { type: boolean }
+        torrent_url: { type: string }
+        listen_port: { type: integer }
+        public_host: { type: string, nullable: true }
+        dial_endpoint: { type: string, nullable: true }
+        howto: { type: string }
+        share_path: { type: string }

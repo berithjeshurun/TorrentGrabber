@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TorrentSearch</title>
+  <link rel="icon" href="/ui/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/ui/css/tailwind.css" />
+  <link rel="stylesheet" href="/ui/css/app.css" />
+  <script src="/ui/vendor/hls.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js" defer></script>
+  <script type="module" src="/ui/js/app.js"></script>
+</head>
+<body class="bg-ink-950 text-fog-bright font-sans antialiased min-h-screen overflow-x-hidden">
+  <div class="atmosphere" aria-hidden="true"></div>
+
+  <header class="relative z-10 px-5 sm:px-8 pt-7 pb-3 max-w-7xl mx-auto">
+    <div class="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <h1 class="font-display text-4xl sm:text-5xl font-extrabold tracking-tight leading-none">
+          Torrent<span class="text-mint">Search</span>
+        </h1>
+        <p id="health-phrase" class="mt-3 text-fog max-w-xl text-sm sm:text-base">Connecting…</p>
+      </div>
+      <div class="flex items-center gap-3 text-xs sm:text-sm">
+        <span id="health-pill" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-ink-700 bg-ink-900/80">
+          <span class="h-2 w-2 rounded-full bg-fog pulse-dot"></span>
+          <span id="health-status">…</span>
+        </span>
+        <span id="meta-line" class="text-fog hidden sm:inline">—</span>
+      </div>
+    </div>
+
+    <nav class="mt-7 flex gap-1 border-b border-ink-700/80" role="tablist">
+      <button type="button" data-tab="search" class="tab-btn tab-active">Search</button>
+      <button type="button" data-tab="library" class="tab-btn">Library</button>
+      <button type="button" data-tab="downloads" class="tab-btn">Downloads <span id="dl-count" class="tab-count"></span></button>
+      <button type="button" data-tab="history" class="tab-btn">History</button>
+      <button type="button" data-tab="activity" class="tab-btn">Activity</button>
+    </nav>
+  </header>
+
+  <main class="relative z-10 px-5 sm:px-8 pb-20 max-w-7xl mx-auto">
+    <section id="panel-search" class="panel">
+      <form id="search-form" class="mt-6 space-y-4">
+        <div class="flex flex-col sm:flex-row gap-3">
+          <label class="block flex-1">
+            <span class="label">Search</span>
+            <input id="q" type="search" required placeholder="What are you looking for?"
+              class="field text-base" autocomplete="off" autofocus />
+          </label>
+          <label class="block sm:w-40">
+            <span class="label">Category</span>
+            <select id="category" class="field">
+              <option>All</option><option>Anime</option><option>Apps</option>
+              <option>Books</option><option>Games</option><option>Movies</option>
+              <option>Music</option><option>Series</option><option>Other</option>
+            </select>
+          </label>
+          <label class="block sm:w-28">
+            <span class="label">Limit</span>
+            <input id="max_results" type="number" min="1" max="200" value="40" class="field" />
+          </label>
+          <div class="flex items-end">
+            <button type="submit" id="search-btn" class="btn-primary w-full sm:w-auto">Search</button>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap gap-3 items-center">
+          <label class="check"><input type="checkbox" id="hide_dead" checked /> Hide dead</label>
+          <label class="check"><input type="checkbox" id="resolve_magnets" checked /> Resolve magnets</label>
+          <label class="check"><input type="checkbox" id="all_providers" /> All providers</label>
+          <label class="check"><input type="checkbox" id="nsfw" /> Include NSFW</label>
+          <button type="button" id="toggle-providers" class="btn-ghost text-xs py-1.5 px-2.5">Providers</button>
+          <button type="button" id="demo-stream" class="btn-secondary text-xs py-1.5 px-2.5">
+            Demo stream (Sintel)
+          </button>
+        </div>
+
+        <div id="provider-panel" class="hidden rounded-xl border border-ink-700 bg-ink-900/60 p-3">
+          <div class="flex justify-between items-center mb-2">
+            <span class="text-xs text-fog uppercase tracking-wider">Enabled providers (empty = defaults)</span>
+            <div class="flex gap-2">
+              <button type="button" id="prov-defaults" class="btn-tiny">Defaults</button>
+              <button type="button" id="prov-none" class="btn-tiny">Clear</button>
+            </div>
+          </div>
+          <div id="provider-list" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5 max-h-48 overflow-y-auto"></div>
+        </div>
+      </form>
+
+      <div id="search-meta" class="mt-4 text-sm text-fog min-h-[1.25rem]"></div>
+      <div id="search-errors" class="mt-2 space-y-1 text-sm"></div>
+      <div id="results" class="mt-5 space-y-2"></div>
+      <p id="results-empty" class="mt-12 text-fog text-center">Search to see torrents from multiple providers.</p>
+    </section>
+
+    <section id="panel-library" class="panel hidden">
+      <div class="mt-6 flex items-end justify-between gap-4">
+        <div>
+          <h2 class="font-display text-2xl font-bold">Library</h2>
+          <p class="text-fog text-sm mt-1">Continue watching and recent downloads.</p>
+        </div>
+        <button type="button" id="library-refresh" class="btn-ghost">Refresh</button>
+      </div>
+      <h3 class="mt-6 text-sm uppercase tracking-wider text-fog">Continue watching</h3>
+      <div id="library-continue" class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
+      <p id="library-continue-empty" class="mt-4 text-fog text-sm hidden">Nothing in progress yet — start a stream from Downloads.</p>
+      <h3 class="mt-8 text-sm uppercase tracking-wider text-fog">Recent downloads</h3>
+      <div id="library-downloads" class="mt-3 space-y-2"></div>
+    </section>
+
+    <section id="panel-downloads" class="panel hidden">
+      <div class="mt-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 class="font-display text-2xl font-bold">Downloads</h2>
+          <p class="text-fog text-sm mt-1">Server BitTorrent → Watch plays via HTTP media stream.</p>
+        </div>
+        <div class="flex flex-wrap gap-2 items-end">
+          <label class="block">
+            <span class="label">Mode preset</span>
+            <select id="dl-preset" class="field min-w-[11rem]"></select>
+          </label>
+          <label class="block sm:min-w-[18rem] flex-1">
+            <span class="label">Or paste magnet</span>
+            <input id="dl-magnet" type="text" placeholder="magnet:?xt=urn:btih:…" class="field" />
+          </label>
+          <button type="button" id="dl-add" class="btn-secondary">Start</button>
+        </div>
+      </div>
+      <div id="downloads" class="mt-6 space-y-3"></div>
+      <p id="downloads-empty" class="mt-12 text-fog text-center">No active downloads. Start one from search results.</p>
+    </section>
+
+    <section id="panel-history" class="panel hidden">
+      <div class="mt-6 flex items-end justify-between gap-4">
+        <div>
+          <h2 class="font-display text-2xl font-bold">History</h2>
+          <p class="text-fog text-sm mt-1">Open a saved search to browse or download again</p>
+        </div>
+        <button type="button" id="history-refresh" class="btn-ghost">Refresh</button>
+      </div>
+      <div id="history" class="mt-6 space-y-2"></div>
+    </section>
+
+    <section id="panel-activity" class="panel hidden">
+      <div class="mt-6 flex items-end justify-between gap-4">
+        <div>
+          <h2 class="font-display text-2xl font-bold">Activity</h2>
+          <p class="text-fog text-sm mt-1">Live status from the server</p>
+        </div>
+        <button type="button" id="activity-refresh" class="btn-ghost">Refresh</button>
+      </div>
+      <ol id="activity" class="mt-6 space-y-2 border-l border-ink-700 pl-4"></ol>
+    </section>
+  </main>
+
+  <!-- Stream player — Cinema chrome + stats for nerds -->
+  <div id="player-overlay" class="player-overlay hidden" aria-hidden="true">
+    <div class="player-shell">
+      <div class="player-top">
+        <div class="min-w-0">
+          <p class="text-xs uppercase tracking-[0.2em] text-mint mb-1">Now streaming</p>
+          <h2 id="player-title" class="font-display text-lg sm:text-xl font-bold truncate">—</h2>
+          <p id="player-status" class="text-sm text-fog mt-1">Starting…</p>
+        </div>
+        <button type="button" id="player-close" class="btn-ghost shrink-0">Close</button>
+      </div>
+
+      <div id="cinema" class="cinema chrome-visible" role="application" aria-label="Video player">
+        <video id="player-video" class="player-video" playsinline></video>
+
+        <div class="cinema-bigplay" data-cinema="bigplay" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="64" height="64" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </div>
+
+        <div class="cinema-spinner" aria-hidden="true"></div>
+
+        <div id="nerd-stats" class="nerd-stats hidden" aria-live="polite">
+          <div class="nerd-title">Stats for nerds</div>
+          <div id="nerd-body" class="nerd-body"></div>
+          <p class="nerd-hint">Press <kbd>i</kbd> to toggle</p>
+        </div>
+
+        <div class="cinema-gradient" aria-hidden="true"></div>
+
+        <div class="cinema-chrome">
+          <div class="cinema-title-row">
+            <span id="cinema-title" class="cinema-ep-title">—</span>
+            <span class="cinema-live hidden" data-cinema="live">LIVE BUFFER</span>
+          </div>
+
+          <div class="cinema-scrub" data-cinema="scrub" role="slider" aria-label="Seek">
+            <canvas class="cinema-wave" data-cinema="wave" width="800" height="28" aria-hidden="true"></canvas>
+            <div class="cinema-scrub-buf" data-cinema="buf"></div>
+            <div class="cinema-scrub-played" data-cinema="played"></div>
+            <div class="cinema-scrub-thumb" data-cinema="thumb"></div>
+          </div>
+
+          <div class="cinema-bar">
+            <div class="cinema-bar-left">
+              <button type="button" class="cinema-btn" data-cinema="play" aria-label="Play"></button>
+              <button type="button" class="cinema-btn" data-cinema="back" aria-label="Back 10s" title="−10s">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.3 0 6 2.7 6 6s-2.7 6-6 6-6-2.7-6-6H4c0 4.4 3.6 8 8 8s8-3.6 8-8-3.6-8-8-8zm-1 4h2v6h-2zm0 0"/></svg>
+              </button>
+              <button type="button" class="cinema-btn" data-cinema="fwd" aria-label="Forward 10s" title="+10s">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 5V1l5 5-5 5V7c-3.3 0-6 2.7-6 6s2.7 6 6 6 6-2.7 6-6h2c0 4.4-3.6 8-8 8s-8-3.6-8-8 3.6-8 8-8zm-1 4h2v6h-2z"/></svg>
+              </button>
+              <button type="button" class="cinema-btn" data-cinema="mute" aria-label="Mute"></button>
+              <input type="range" class="cinema-vol" data-cinema="vol" min="0" max="1" step="0.01" value="1" aria-label="Volume" />
+              <span class="cinema-time"><span data-cinema="cur">0:00</span> / <span data-cinema="dur">0:00</span></span>
+            </div>
+            <div class="cinema-bar-right">
+              <select class="cinema-abr hidden" data-cinema="abr" title="Quality" aria-label="Quality">
+                <option value="0">Auto</option>
+                <option value="360">360p</option>
+                <option value="720">720p</option>
+                <option value="1080">1080p</option>
+              </select>
+              <button type="button" class="cinema-btn cinema-text-btn" data-cinema="boost" title="Boost ahead">Boost</button>
+              <button type="button" class="cinema-btn cinema-text-btn" data-cinema="cast" title="Cast (Chromecast / AirPlay / DLNA)">Cast</button>
+              <button type="button" class="cinema-btn cinema-text-btn" data-cinema="invite" title="Friend invite QR">Invite</button>
+              <button type="button" class="cinema-btn cinema-text-btn" data-cinema="tracks" title="Audio &amp; subs">Audio</button>
+              <button type="button" class="cinema-btn cinema-text-btn" data-cinema="stats" title="Stats for nerds (i)">Stats</button>
+              <button type="button" class="cinema-btn" data-cinema="fs" aria-label="Fullscreen">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="player-foot">
+        <div id="player-tracks" class="player-tracks hidden">
+          <label class="player-track-field">
+            <span>Audio</span>
+            <select id="player-audio" class="field"></select>
+          </label>
+          <label class="player-track-field">
+            <span>Subtitles</span>
+            <select id="player-subs" class="field"></select>
+          </label>
+          <div class="player-track-field" style="grid-column:1/-1">
+            <span>OpenSubtitles</span>
+            <div class="flex flex-wrap gap-2 items-center">
+              <button type="button" id="player-osubs-search" class="btn-tiny">Search online</button>
+              <select id="player-osubs" class="field flex-1 min-w-[12rem]"></select>
+              <button type="button" id="player-osubs-attach" class="btn-tiny">Attach</button>
+            </div>
+          </div>
+        </div>
+        <p class="text-xs text-fog">
+          Cinema controls · <kbd class="kbd">i</kbd> stats for nerds ·
+          <kbd class="kbd">f</kbd> fullscreen · <kbd class="kbd">space</kbd> play/pause
+        </p>
+        <label class="player-track-field" id="player-files-wrap">
+          <span>File</span>
+          <select id="player-files" class="field hidden"></select>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

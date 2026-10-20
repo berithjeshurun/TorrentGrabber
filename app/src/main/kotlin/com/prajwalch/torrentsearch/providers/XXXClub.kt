@@ -1,0 +1,186 @@
+package com.prajwalch.torrentsearch.providers
+
+import com.prajwalch.torrentsearch.domain.model.Category
+import com.prajwalch.torrentsearch.domain.model.MagnetUri
+import com.prajwalch.torrentsearch.domain.model.SearchProviderSafety
+import com.prajwalch.torrentsearch.domain.model.Torrent
+import com.prajwalch.torrentsearch.domain.model.TorrentDetails
+import com.prajwalch.torrentsearch.network.NetworkClient
+import com.prajwalch.torrentsearch.provider.LatestTorrentsProvider
+import com.prajwalch.torrentsearch.provider.MagnetUriProvider
+import com.prajwalch.torrentsearch.provider.SearchProvider
+import com.prajwalch.torrentsearch.provider.SearchProviderId
+import com.prajwalch.torrentsearch.provider.TopTorrentsProvider
+import com.prajwalch.torrentsearch.provider.TorrentDetailsProvider
+import com.prajwalch.torrentsearch.util.TorrentDateParser
+import com.prajwalch.torrentsearch.util.TorrentUtils
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
+
+class XXXClub(private val networkClient: NetworkClient) :
+    SearchProvider,
+    LatestTorrentsProvider,
+    TopTorrentsProvider,
+    MagnetUriProvider,
+    TorrentDetailsProvider {
+    override val id = "xxxclub"
+    override val name = "XXXClub"
+    override val url = "https://xxxclub.to"
+    override val supportedCategories = setOf(Category.Porn)
+    override val safety = SearchProviderSafety.Safe
+    override val enabledByDefault = false
+
+    private val resultsPageParser = XXXClubResultsPageParser(id, name)
+
+    override suspend fun search(query: String, category: Category): List<Torrent> {
+        val requestUrl = "${url}/torrents/search/all/$query"
+        val responseHtml = networkClient.getText(url = requestUrl)
+
+        return resultsPageParser.parse(html = responseHtml, pageUrl = requestUrl)
+    }
+
+    override suspend fun getDetails(detailsPageUrl: String): TorrentDetails? {
+        val responseHtml = networkClient.getText(detailsPageUrl)
+        return XXXClubDetailsPageParser.parse(responseHtml, detailsPageUrl)
+    }
+
+    override suspend fun getLastestTorrents(category: Category): List<Torrent> {
+        val requestUrl = "$url/torrents/browse/all"
+        val responseHtml = networkClient.getText(requestUrl)
+
+        return resultsPageParser.parse(html = responseHtml, pageUrl = requestUrl)
+    }
+
+    override suspend fun getTopTorrents(category: Category): List<Torrent> {
+        val requestUrl = "$url/torrents/top100"
+        val responseHtml = networkClient.getText(requestUrl)
+
+        return resultsPageParser.parse(html = responseHtml, pageUrl = requestUrl)
+    }
+
+    override suspend fun getMagnetUri(url: String): String {
+        val detailsPageHtml = networkClient.getText(url)
+        return XXXClubDetailsPageParser.extractMagnetUri(detailsPageHtml)
+            ?: error("Failed to retrieve magnet URI from '$url'")
+    }
+}
+
+private class XXXClubResultsPageParser(
+    private val providerId: SearchProviderId,
+    private val providerName: String,
+) {
+    suspend fun parse(html: String, pageUrl: String): List<Torrent> =
+        withContext(Dispatchers.Default) {
+            Jsoup.parse(html, pageUrl)
+                .selectFirst(LIST_ITEM_CONTAINER)
+                ?.select(LIST_ITEM)
+                ?.mapNotNull(::parseListItem)
+                .orEmpty()
+        }
+
+    private fun parseListItem(listItem: Element): Torrent? {
+        val detailsPageUrl = listItem.selectFirst(DETAILS_PAGE_URL)
+            ?.attr("abs:href")
+            ?: return null
+        val torrentId = TorrentUtils.createTorrentId(
+            providerId = providerId,
+            sourceId = detailsPageUrl,
+        )
+        val name = listItem.selectFirst(NAME)?.text() ?: return null
+        val size = listItem.selectFirst(SIZE)?.ownText()
+        val seeders = listItem.selectFirst(SEEDERS)?.ownText()?.toUIntOrNull()
+        val peers = listItem.selectFirst(PEERS)?.ownText()?.toUIntOrNull()
+        val uploadDate = listItem.selectFirst(UPLOAD_DATE)
+            ?.ownText()
+            ?.let { TorrentDateParser.parse(date = it, format = "dd MMM yyyy HH:mm:ss") }
+
+        return Torrent(
+            id = torrentId,
+            name = name,
+            size = size,
+            seeders = seeders,
+            peers = peers,
+            providerName = providerName,
+            uploadDate = uploadDate,
+            category = Category.Porn,
+            magnetUri = MagnetUri.RequiresFetch(detailsPageUrl),
+            detailsPageUrl = detailsPageUrl,
+        )
+    }
+
+    private companion object {
+        private const val LIST_ITEM_CONTAINER = "div.browsetableinside, div.divtableinside"
+        private const val LIST_ITEM = "ul > li"
+        private const val NAME = """span:nth-child(2) > a[href^="/torrents/details"]"""
+        private const val SIZE = "span.siz"
+        private const val SEEDERS = "span.see"
+        private const val PEERS = "span.lee"
+        private const val UPLOAD_DATE = "span.adde"
+        private const val DETAILS_PAGE_URL = NAME
+    }
+}
+
+private object XXXClubDetailsPageParser {
+    private const val NAME = "body > div > div.middle > div.main-content > div > h1"
+    private const val SIZE = "div.detailsdescr > ul > li:nth-child(2) > span:nth-child(3)"
+    private const val SEEDERS = "div.detailsdescr font.see"
+    private const val PEERS = "div.detailsdescr font.lee"
+    private const val UPLOAD_DATE = "div.detailsdescr > ul > li:nth-child(3) > span:nth-child(3)"
+    private const val UPLOADER = "div.detailsdescr > ul > li:nth-child(6) > span:nth-child(3)"
+    private const val LAST_CHECKED = "div.detailsdescr > ul > li:nth-child(5) > span:nth-child(3)"
+    private const val MAGNET_URI = """a[href^="magnet:?"]"""
+    private const val FILE_DOWNLOAD_LINK =
+        "div.detailsdescr > ul > li.downloadboxlist > span:nth-child(1) > a"
+    private const val DESCRIPTION = "div.description"
+    private const val POSTER_URL = "img.detailsposter"
+    private const val DATE_FORMAT = "dd MMM yyyy HH:mm:ss"
+
+    suspend fun parse(html: String, pageUrl: String): TorrentDetails? =
+        withContext(Dispatchers.Default) {
+            val html = Jsoup.parse(html, pageUrl)
+
+            val name = html.selectFirst(NAME)?.ownText() ?: return@withContext null
+            val magnetUri = html.selectFirst(MAGNET_URI)?.attr("href") ?: return@withContext null
+            val infoHash = TorrentUtils.getInfoHashFromMagnetUri(magnetUri)
+            val size = html.selectFirst(SIZE)?.ownText()
+            val seeders = html.selectFirst(SEEDERS)?.ownText()?.toUIntOrNull()
+            val peers = html.selectFirst(PEERS)?.ownText()?.toUIntOrNull()
+            val uploadDate = html.selectFirst(UPLOAD_DATE)
+                ?.ownText()
+                ?.let { TorrentDateParser.parse(date = it, format = DATE_FORMAT) }
+            val uploader = html.selectFirst(UPLOADER)?.ownText()
+            val lastChecked = html.selectFirst(LAST_CHECKED)
+                ?.ownText()
+                // Some torrents will have "Pending" status.
+                ?.let { runCatching { TorrentDateParser.parse(date = it, format = DATE_FORMAT) } }
+                ?.getOrNull()
+            val fileDownloadLink = html.selectFirst(FILE_DOWNLOAD_LINK)?.attr("abs:href")
+            val description = html.selectFirst(DESCRIPTION)?.html()
+            val posterUrl = html.selectFirst(POSTER_URL)?.attr("src")
+
+            TorrentDetails(
+                infoHash = infoHash,
+                name = name,
+                size = size,
+                seeders = seeders,
+                peers = peers,
+                uploadDate = uploadDate,
+                category = Category.Porn,
+                uploader = uploader,
+                lastChecked = lastChecked,
+                magnetUri = magnetUri,
+                fileDownloadLink = fileDownloadLink,
+                description = description,
+                posterUrl = posterUrl,
+            )
+        }
+
+    suspend fun extractMagnetUri(detailsPageHtml: String): String? =
+        withContext(Dispatchers.Default) {
+            Jsoup.parse(detailsPageHtml).selectFirst(MAGNET_URI)?.attr("href")
+        }
+}

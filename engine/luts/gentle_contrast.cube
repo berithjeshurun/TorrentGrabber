@@ -1,0 +1,12 @@
+TITLE "TorrentGrabber Gentle Contrast"
+# Sample 2^3 identity-ish LUT with slight contrast lift for demos.
+# Drop your own .cube files here and set hls.lut_cube in config.yaml
+LUT_3D_SIZE 2
+0.02 0.02 0.02
+0.98 0.02 0.02
+0.02 0.98 0.02
+0.98 0.98 0.02
+0.02 0.02 0.98
+0.98 0.02 0.98
+0.02 0.98 0.98
+1.00 1.00 1.00

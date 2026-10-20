@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>torrent-engine test player</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+  <style>
+    :root {
+      --bg: #12151a;
+      --panel: #1a1f27;
+      --line: #2a3340;
+      --text: #e8edf4;
+      --muted: #8b96a8;
+      --accent: #3dd6c6;
+      --warn: #e8a54b;
+      --bad: #e25b5b;
+      --ok: #6bcf7f;
+      --font: "IBM Plex Sans", "Segoe UI", sans-serif;
+      --mono: "IBM Plex Mono", Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1e3a3a 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #2a2438 0%, transparent 45%),
+        var(--bg);
+      color: var(--text);
+      font: 14px/1.45 var(--font);
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: end;
+      justify-content: space-between;
+      padding: 18px 22px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.15rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    header p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .conn {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--muted);
+      display: inline-block;
+    }
+    .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(107,207,127,.2); }
+    .dot.bad { background: var(--bad); }
+    main {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) 1fr;
+      gap: 16px;
+      padding: 16px 22px 28px;
+    }
+    @media (max-width: 960px) {
+      main { grid-template-columns: 1fr; }
+    }
+    .panel {
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .panel h2 {
+      margin: 0 0 10px;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    label {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin: 8px 0 4px;
+    }
+    input, select, textarea, button {
+      font: inherit;
+      color: var(--text);
+    }
+    input, select, textarea {
+      width: 100%;
+      background: #0f1318;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 8px 10px;
+    }
+    textarea { min-height: 72px; resize: vertical; font-family: var(--mono); font-size: 12px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    button {
+      background: #24303c;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    button.primary {
+      background: color-mix(in srgb, var(--accent) 22%, #1a222c);
+      border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+      color: #d7fffa;
+    }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .stage {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    video {
+      width: 100%;
+      max-height: 58vh;
+      background: #000;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      aspect-ratio: 16 / 9;
+      object-fit: contain;
+    }
+    video::cue {
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      font-size: 1.05rem;
+      line-height: 1.35;
+    }
+    .meters {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+    @media (max-width: 720px) {
+      .meters { grid-template-columns: 1fr 1fr; }
+    }
+    .meter {
+      background: #0f1318;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .meter .k { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    .meter .v { font-family: var(--mono); font-size: 0.95rem; margin-top: 4px; }
+    .meter.warn .v { color: var(--warn); }
+    .meter.bad .v { color: var(--bad); }
+    .bar {
+      height: 6px;
+      background: #0a0d11;
+      border-radius: 99px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .bar > i {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), #6bcf7f);
+    }
+    .bar.underrun > i { background: var(--bad); }
+    .list {
+      max-height: 180px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0f1318;
+    }
+    .list button.item {
+      width: 100%;
+      text-align: left;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      border-radius: 0;
+      background: transparent;
+      padding: 8px 10px;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+    .list button.item.active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+    .list button.item:last-child { border-bottom: 0; }
+    .log {
+      font-family: var(--mono);
+      font-size: 11px;
+      max-height: 160px;
+      overflow: auto;
+      white-space: pre-wrap;
+      color: var(--muted);
+      background: #0f1318;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    #inviteBox {
+      display: none;
+      margin-top: 10px;
+      gap: 12px;
+      align-items: start;
+    }
+    #inviteBox.show { display: flex; flex-wrap: wrap; }
+    #qr { background: #fff; padding: 8px; border-radius: 6px; }
+    #inviteText {
+      flex: 1;
+      min-width: 180px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      word-break: break-all;
+    }
+    .hint { color: var(--muted); font-size: 0.8rem; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>torrent-engine test player</h1>
+      <p>3rd-party harness against <code>/v1</code> on localhost</p>
+    </div>
+    <div class="conn">
+      <span id="healthDot" class="dot" title="engine health"></span>
+      <input id="baseUrl" style="width:min(320px,70vw)" value="http://127.0.0.1:17890" spellcheck="false" />
+      <button id="btnConnect" class="primary">Connect</button>
+      <button id="btnFind">Find</button>
+      <span id="healthLabel" class="hint" style="margin:0">disconnected</span>
+    </div>
+  </header>
+
+  <main>
+    <aside>
+      <section class="panel">
+        <h2>Add torrent</h2>
+        <label for="magnet">magnet / .torrent path / http(s) URL</label>
+        <textarea id="magnet" placeholder="magnet:?xt=urn:btih:…"></textarea>
+        <label for="mode">mode</label>
+        <select id="mode">
+          <option value="stream" selected>stream</option>
+          <option value="general">general</option>
+          <option value="friend">friend</option>
+          <option value="preview">preview</option>
+          <option value="fastest">fastest</option>
+          <option value="seed">seed</option>
+        </select>
+        <label for="peers">friend peers (optional, ip:port comma-separated)</label>
+        <input id="peers" placeholder="100.x.x.x:6881" />
+        <div class="row">
+          <button id="btnAdd" class="primary">Add</button>
+          <button id="btnRefresh">Refresh list</button>
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top:12px">
+        <h2>Jobs</h2>
+        <div id="jobList" class="list"></div>
+        <div class="row">
+          <button id="btnPause">Pause</button>
+          <button id="btnResume">Resume</button>
+          <button id="btnRemove">Remove</button>
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top:12px">
+        <h2>Playback</h2>
+        <label for="audioTrack">audio</label>
+        <select id="audioTrack"><option value="">default</option></select>
+        <label for="subTrack">subtitles</label>
+        <select id="subTrack"><option value="">off</option></select>
+        <p class="hint" id="trackHint">Tracks load when you Play HLS or click Probe.</p>
+        <label for="abrHeight">ABR height</label>
+        <select id="abrHeight">
+          <option value="0">auto</option>
+          <option value="360">360</option>
+          <option value="720">720</option>
+          <option value="1080">1080</option>
+        </select>
+        <div class="row">
+          <label style="display:flex;align-items:center;gap:6px;margin:0">
+            <input type="checkbox" id="optAbr" /> ABR ladder
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;margin:0">
+            <input type="checkbox" id="optAudioOnly" /> audio only
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;margin:0">
+            <input type="checkbox" id="optLoudnorm" /> loudnorm
+          </label>
+        </div>
+        <div class="row">
+          <button id="btnHls" class="primary">Play HLS</button>
+          <button id="btnMedia">Play /media</button>
+          <button id="btnTracks">Probe tracks</button>
+        </div>
+        <div class="row">
+          <button id="btnBoost">Boost 30s ×2</button>
+          <button id="btnInvite">Invite QR</button>
+          <button id="btnPoster">Poster</button>
+        </div>
+        <div id="inviteBox">
+          <canvas id="qr" width="128" height="128"></canvas>
+          <div id="inviteText"></div>
+        </div>
+      </section>
+    </aside>
+
+    <section class="stage">
+      <video id="video" controls playsinline></video>
+      <div class="meters">
+        <div class="meter" id="mProgress">
+          <div class="k">Progress</div>
+          <div class="v">—</div>
+          <div class="bar"><i id="progressBar"></i></div>
+        </div>
+        <div class="meter" id="mRate">
+          <div class="k">Download</div>
+          <div class="v">—</div>
+        </div>
+        <div class="meter" id="mPeers">
+          <div class="k">Peers / status</div>
+          <div class="v">—</div>
+        </div>
+        <div class="meter" id="mBuffer">
+          <div class="k">Buffer ahead</div>
+          <div class="v">—</div>
+          <div class="bar" id="bufferBarWrap"><i id="bufferBar"></i></div>
+        </div>
+      </div>
+      <section class="panel">
+        <h2>Log</h2>
+        <div id="log" class="log"></div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const qsEngine = new URLSearchParams(location.search).get("engine");
+    const state = {
+      base: qsEngine || localStorage.getItem("te_base") || "http://127.0.0.1:17890",
+      id: localStorage.getItem("te_id") || null,
+      hls: null,
+      pollTimer: null,
+      jobs: [],
+      tracks: null,
+      burnSubtitle: null,
+      subBlobUrl: null,
+      hlsOriginSec: 0,
+      rawVttText: null,
+      subLabel: null,
+    };
+
+    $("baseUrl").value = state.base;
+
+    function log(msg, obj) {
+      const line = `[${new Date().toLocaleTimeString()}] ${msg}` +
+        (obj !== undefined ? " " + JSON.stringify(obj, null, 0) : "");
+      const el = $("log");
+      el.textContent = line + "\n" + el.textContent.slice(0, 8000);
+      console.log(msg, obj);
+    }
+
+    function base() {
+      return $("baseUrl").value.replace(/\/$/, "");
+    }
+
+    async function api(path, opts = {}) {
+      const url = base() + path;
+      const res = await fetch(url, {
+        ...opts,
+        headers: {
+          ...(opts.body ? { "Content-Type": "application/json" } : {}),
+          ...(opts.headers || {}),
+        },
+      });
+      const ct = res.headers.get("content-type") || "";
+      let data = null;
+      if (ct.includes("application/json")) {
+        data = await res.json().catch(() => null);
+      } else if (!res.ok) {
+        data = { error: await res.text().catch(() => res.statusText) };
+      }
+      if (!res.ok) {
+        const err = (data && (data.error || data.detail)) || res.statusText;
+        throw new Error(typeof err === "string" ? err : JSON.stringify(err));
+      }
+      return data;
+    }
+
+    function destroyHls() {
+      if (state.hls) {
+        try { state.hls.destroy(); } catch (_) {}
+        state.hls = null;
+      }
+    }
+
+    function fmtBytes(n) {
+      if (n == null || !Number.isFinite(n)) return "—";
+      const u = ["B", "KB", "MB", "GB", "TB"];
+      let i = 0, v = Math.max(0, n);
+      while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+      return `${v.toFixed(i ? 1 : 0)} ${u[i]}`;
+    }
+
+    function fmtRate(bps) {
+      if (bps == null) return "—";
+      return `${fmtBytes(bps)}/s`;
+    }
+
+    function setHealth(ok, text) {
+      const dot = $("healthDot");
+      dot.className = "dot " + (ok ? "ok" : "bad");
+      $("healthLabel").textContent = text;
+    }
+
+    async function connect() {
+      state.base = base();
+      localStorage.setItem("te_base", state.base);
+      try {
+        const h = await api("/v1/health");
+        setHealth(true, `${h.name || "engine"} ${h.version || ""} · ok`);
+        log("connected", h);
+        await refreshJobs();
+        startPoll();
+      } catch (e) {
+        setHealth(false, `no engine at ${state.base}`);
+        log("connect failed: " + e.message);
+        log("Tip: use the port from ENGINE_READY port=N, or click Find");
+      }
+    }
+
+    async function findEngine() {
+      setHealth(false, "scanning…");
+      log("scanning localhost for /v1/health…");
+      const candidates = new Set([17890, 58976, 39694, 8080, 18080, 19000]);
+      // Prefer the port already typed in the box
+      try {
+        const u = new URL(base());
+        if (u.port) candidates.add(Number(u.port));
+      } catch (_) {}
+      const saved = localStorage.getItem("te_base");
+      if (saved) {
+        try { candidates.add(Number(new URL(saved).port)); } catch (_) {}
+      }
+      // Ephemeral high ports the engine often lands on when port: 0
+      for (let p = 49152; p <= 65535; p += 64) candidates.add(p);
+      for (let p = 30000; p <= 40000; p += 128) candidates.add(p);
+
+      const ports = [...candidates].filter((p) => p > 0 && p < 65536);
+      const ctrl = new AbortController();
+      const deadline = setTimeout(() => ctrl.abort(), 8000);
+      let found = null;
+      // Probe in parallel batches
+      const batchSize = 40;
+      for (let i = 0; i < ports.length && !found; i += batchSize) {
+        const slice = ports.slice(i, i + batchSize);
+        const hits = await Promise.all(slice.map(async (port) => {
+          try {
+            const res = await fetch(`http://127.0.0.1:${port}/v1/health`, {
+              signal: ctrl.signal,
+            });
+            if (!res.ok) return null;
+            const j = await res.json();
+            if (j && j.ok && (j.name === "torrent-engine" || j.version)) {
+              return { port, j };
+            }
+          } catch (_) { /* closed */ }
+          return null;
+        }));
+        found = hits.find(Boolean) || null;
+      }
+      clearTimeout(deadline);
+      if (!found) {
+        setHealth(false, "engine not found — is it running?");
+        log("scan found nothing. Restart engine and paste ENGINE_READY port.");
+        return;
+      }
+      $("baseUrl").value = `http://127.0.0.1:${found.port}`;
+      log(`found engine on port ${found.port}`, found.j);
+      await connect();
+    }
+
+    function parsePeers(raw) {
+      if (!raw || !raw.trim()) return undefined;
+      return raw.split(/[,;\s]+/).filter(Boolean).map((p) => {
+        const [ip, port] = p.split(":");
+        return { ip, port: Number(port) || 6881 };
+      });
+    }
+
+    async function addTorrent() {
+      const magnet = $("magnet").value.trim();
+      if (!magnet) return log("magnet/path/url required");
+      const body = {
+        magnet,
+        mode: $("mode").value,
+      };
+      const peers = parsePeers($("peers").value);
+      if (peers) body.peers = peers;
+      try {
+        const j = await api("/v1/torrents", { method: "POST", body: JSON.stringify(body) });
+        state.id = j.id;
+        localStorage.setItem("te_id", state.id);
+        log("added", j);
+        await refreshJobs();
+      } catch (e) {
+        log("add failed: " + e.message);
+      }
+    }
+
+    function renderJobs() {
+      const box = $("jobList");
+      box.innerHTML = "";
+      if (!state.jobs.length) {
+        box.innerHTML = `<div style="padding:10px;color:var(--muted)">No torrents</div>`;
+        return;
+      }
+      for (const j of state.jobs) {
+        const b = document.createElement("button");
+        b.className = "item" + (j.id === state.id ? " active" : "");
+        b.type = "button";
+        const pct = ((j.progress || 0) * 100).toFixed(1);
+        b.textContent = `${j.id.slice(0, 8)} · ${j.status || "?"} · ${pct}% · ${j.name || "(metadata)"}`;
+        b.onclick = () => {
+          state.id = j.id;
+          localStorage.setItem("te_id", state.id);
+          renderJobs();
+          updateMeters(j);
+          probeTracks({ silent: true }).catch(() => {});
+        };
+        box.appendChild(b);
+      }
+    }
+
+    async function refreshJobs() {
+      try {
+        const list = await api("/v1/torrents");
+        state.jobs = Array.isArray(list) ? list : [];
+        if (state.id && !state.jobs.some((j) => j.id === state.id)) {
+          state.id = state.jobs[0]?.id || null;
+        }
+        if (!state.id && state.jobs[0]) state.id = state.jobs[0].id;
+        renderJobs();
+        const cur = state.jobs.find((j) => j.id === state.id);
+        if (cur) updateMeters(cur);
+      } catch (e) {
+        log("list failed: " + e.message);
+      }
+    }
+
+    function updateMeters(j) {
+      const pct = ((j.progress || 0) * 100);
+      $("mProgress").querySelector(".v").textContent =
+        `${pct.toFixed(1)}% · ${fmtBytes(j.downloaded_bytes)} / ${fmtBytes(j.total_bytes)}`;
+      $("progressBar").style.width = `${Math.min(100, pct)}%`;
+      $("mRate").querySelector(".v").textContent = fmtRate(j.download_rate);
+      $("mPeers").querySelector(".v").textContent =
+        `${j.num_peers ?? 0} · ${j.status || "—"}`;
+    }
+
+    async function pollBuffer() {
+      if (!state.id) return;
+      try {
+        const b = await api(`/v1/torrents/${state.id}/buffer`);
+        const ahead = b.contiguous_ahead_bytes || 0;
+        const sec = b.estimated_ahead_sec;
+        const underrun = !!b.underrun;
+        const m = $("mBuffer");
+        m.className = "meter" + (underrun ? " bad" : (sec != null && sec < 8 ? " warn" : ""));
+        m.querySelector(".v").textContent =
+          `${fmtBytes(ahead)}` + (sec != null ? ` · ~${Number(sec).toFixed(1)}s` : "") +
+          (underrun ? " · UNDERRUN" : "");
+        const wrap = $("bufferBarWrap");
+        wrap.className = "bar" + (underrun ? " underrun" : "");
+        const pct = Math.min(100, (ahead / (48 * 1024 * 1024)) * 100);
+        $("bufferBar").style.width = `${pct}%`;
+      } catch (_) { /* ignore while connecting */ }
+    }
+
+    function startPoll() {
+      if (state.pollTimer) clearInterval(state.pollTimer);
+      state.pollTimer = setInterval(async () => {
+        await refreshJobs();
+        await pollBuffer();
+      }, 1500);
+    }
+
+    async function needId() {
+      if (!state.id) throw new Error("select or add a torrent first");
+      return state.id;
+    }
+
+    async function playHls(startSeconds) {
+      const id = await needId();
+      destroyHls();
+      try { await probeTracks({ silent: true }); } catch (_) {}
+
+      const origin =
+        startSeconds != null && Number.isFinite(startSeconds) && startSeconds > 0
+          ? startSeconds
+          : 0;
+      state.hlsOriginSec = origin;
+
+      const params = new URLSearchParams();
+      const audio = $("audioTrack").value;
+      if (audio !== "") params.set("audio", audio);
+      if (origin > 0) params.set("start_seconds", String(origin));
+      if ($("optAbr").checked) params.set("abr", "true");
+      if ($("optAudioOnly").checked) params.set("audio_only", "true");
+      if ($("optLoudnorm").checked) params.set("loudnorm", "true");
+      if (state.burnSubtitle != null) {
+        params.set("burn_subtitle", String(state.burnSubtitle));
+      }
+      const qs = params.toString();
+      const sess = await api(`/v1/torrents/${id}/hls${qs ? `?${qs}` : ""}`, { method: "POST" });
+      log("hls session", { ...sess, hlsOriginSec: state.hlsOriginSec });
+      const playlist = base() + sess.playlist_url;
+      const video = $("video");
+      if (window.Hls && Hls.isSupported()) {
+        const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+        state.hls = hls;
+        hls.loadSource(playlist);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+          applyAbrPreference(hls);
+          video.play().catch(() => log("press play"));
+          try { await applySelectedSubtitle(id); } catch (e) {
+            log("subtitle: " + e.message);
+          }
+        });
+        hls.on(Hls.Events.ERROR, (_e, data) => {
+          log("hls error", {
+            type: data?.type,
+            details: data?.details,
+            fatal: data?.fatal,
+          });
+          if (data?.fatal) {
+            try { hls.destroy(); } catch (_) {}
+            state.hls = null;
+          }
+        });
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = playlist;
+        video.play().catch(() => {});
+        try { await applySelectedSubtitle(id); } catch (e) {
+          log("subtitle: " + e.message);
+        }
+      } else {
+        throw new Error("HLS not supported in this browser");
+      }
+    }
+
+    function applyAbrPreference(hls) {
+      const want = Number($("abrHeight").value) || 0;
+      if (!want || !hls.levels?.length) {
+        hls.currentLevel = -1;
+        return;
+      }
+      let best = -1, bestDelta = Infinity;
+      hls.levels.forEach((lv, i) => {
+        const d = Math.abs((lv.height || 0) - want);
+        if (d < bestDelta) { bestDelta = d; best = i; }
+      });
+      if (best >= 0) hls.currentLevel = best;
+    }
+
+    function clearSubtitleTracks(video) {
+      if (state.subBlobUrl) {
+        try { URL.revokeObjectURL(state.subBlobUrl); } catch (_) {}
+        state.subBlobUrl = null;
+      }
+      [...video.querySelectorAll("track")].forEach((t) => t.remove());
+      try {
+        for (const tt of video.textTracks || []) tt.mode = "disabled";
+      } catch (_) {}
+    }
+
+    function parseVttTime(s) {
+      const p = String(s).trim().split(":");
+      if (p.length === 3) return (+p[0]) * 3600 + (+p[1]) * 60 + parseFloat(p[2]);
+      if (p.length === 2) return (+p[0]) * 60 + parseFloat(p[1]);
+      return parseFloat(s) || 0;
+    }
+
+    function formatVttTime(sec) {
+      if (!Number.isFinite(sec) || sec < 0) sec = 0;
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec - h * 3600 - m * 60;
+      const whole = Math.floor(s);
+      const ms = Math.round((s - whole) * 1000);
+      const frac = String(ms).padStart(3, "0");
+      if (h > 0) {
+        return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(whole).padStart(2, "0")}.${frac}`;
+      }
+      return `${String(m).padStart(2, "0")}:${String(whole).padStart(2, "0")}.${frac}`;
+    }
+
+    // HLS restarted with -ss N remaps media so player 0:00 == absolute N.
+    // Shift cue times by -N so they line up with the trimmed timeline.
+    function shiftVtt(text, offsetSec) {
+      if (!offsetSec || Math.abs(offsetSec) < 0.05) return text;
+      const re =
+        /^(\d{1,2}:\d{2}(?::\d{2})?\.\d{1,3})\s*-->\s*(\d{1,2}:\d{2}(?::\d{2})?\.\d{1,3})(.*)$/;
+      const out = [];
+      for (const line of text.split(/\r?\n/)) {
+        const m = line.match(re);
+        if (!m) {
+          out.push(line);
+          continue;
+        }
+        let a = parseVttTime(m[1]) - offsetSec;
+        let b = parseVttTime(m[2]) - offsetSec;
+        if (b <= 0) continue;
+        if (a < 0) a = 0;
+        out.push(`${formatVttTime(a)} --> ${formatVttTime(b)}${m[3] || ""}`);
+      }
+      return out.join("\n");
+    }
+
+    function mountVttBlob(video, text, label = "Subtitles") {
+      clearSubtitleTracks(video);
+      if (!text) return;
+      if (!text.trim().startsWith("WEBVTT")) text = "WEBVTT\n\n" + text;
+      text = text.replace(/<\/?b>/gi, "");
+      text = shiftVtt(text, state.hlsOriginSec || 0);
+
+      const blob = new Blob([text], { type: "text/vtt" });
+      state.subBlobUrl = URL.createObjectURL(blob);
+      state.subLabel = label;
+
+      video.crossOrigin = "anonymous";
+      const track = document.createElement("track");
+      track.kind = "subtitles";
+      track.label = label;
+      track.srclang = "en";
+      track.src = state.subBlobUrl;
+      track.default = true;
+      video.appendChild(track);
+
+      const show = () => {
+        try {
+          for (const tt of video.textTracks) {
+            tt.mode =
+              tt.label === label || tt.kind === "subtitles" ? "showing" : "disabled";
+          }
+        } catch (_) {}
+      };
+      track.addEventListener("load", show);
+      show();
+      setTimeout(show, 200);
+      setTimeout(show, 800);
+      setTimeout(show, 2000);
+      if (state.hlsOriginSec > 0) {
+        log(`subs shifted by -${state.hlsOriginSec.toFixed(1)}s for HLS origin`);
+      } else {
+        log(`subs attached (${text.length} bytes)`);
+      }
+    }
+
+    async function attachSubtitleTrack(video, url, label = "Subtitles") {
+      if (!url) {
+        clearSubtitleTracks(video);
+        state.rawVttText = null;
+        return;
+      }
+      const abs = url.startsWith("http") ? url : base() + url;
+      const res = await fetch(abs);
+      if (!res.ok) throw new Error(`subtitle fetch ${res.status}`);
+      let text = await res.text();
+      state.rawVttText = text;
+      mountVttBlob(video, text, label);
+    }
+
+    function rebindSubtitlesToOrigin() {
+      if (!state.rawVttText) return;
+      mountVttBlob($("video"), state.rawVttText, state.subLabel || "Subtitles");
+    }
+
+    function selectedSubMeta() {
+      const v = $("subTrack").value;
+      if (v === "") return null;
+      const idx = Number(v);
+      return (state.tracks?.subtitles || []).find((s) => s.index === idx) || {
+        index: idx,
+        text_based: true,
+      };
+    }
+
+    async function applySelectedSubtitle(id) {
+      const video = $("video");
+      const meta = selectedSubMeta();
+      if (!meta) {
+        state.burnSubtitle = null;
+        clearSubtitleTracks(video);
+        try {
+          await api(`/v1/torrents/${id}/subtitle`, { method: "POST" });
+        } catch (_) {}
+        return;
+      }
+
+      if (meta.text_based === false) {
+        if (state.burnSubtitle !== meta.index) {
+          state.burnSubtitle = meta.index;
+          clearSubtitleTracks(video);
+          log(`hardsub burn-in stream #${meta.index}`);
+          await playHls(state.hlsOriginSec > 0 ? state.hlsOriginSec : undefined);
+          return;
+        }
+        clearSubtitleTracks(video);
+        return;
+      }
+
+      if (state.burnSubtitle != null) {
+        state.burnSubtitle = null;
+        log("restarting HLS without burn-in for softsubs");
+        await playHls(state.hlsOriginSec > 0 ? state.hlsOriginSec : undefined);
+        return;
+      }
+
+      const sub = await api(
+        `/v1/torrents/${id}/subtitle?index=${encodeURIComponent(meta.index)}`,
+        { method: "POST" }
+      );
+      log("subtitle", sub);
+      if (!sub.ready || !sub.subtitle_url) {
+        throw new Error(sub.error || "subtitle extract failed");
+      }
+      const label =
+        [meta.language, meta.title, meta.codec].filter(Boolean).join(" · ") ||
+        "Subs";
+      await attachSubtitleTrack(video, sub.subtitle_url, label);
+    }
+
+    async function onAudioChanged() {
+      if (!state.id || !state.hls) return;
+      log("audio changed — restarting HLS");
+      await playHls(state.hlsOriginSec > 0 ? state.hlsOriginSec : undefined);
+    }
+
+    async function onSubChanged() {
+      if (!state.id) return;
+      try {
+        await applySelectedSubtitle(state.id);
+      } catch (e) {
+        log("subtitle failed: " + e.message);
+      }
+    }
+
+    async function playMedia() {
+      const id = await needId();
+      destroyHls();
+      clearSubtitleTracks($("video"));
+      const video = $("video");
+      const job = state.jobs.find((j) => j.id === id);
+      const name = (job?.file_name || job?.name || job?.media_path || "").toLowerCase();
+      if (/\.(mkv|avi|ts|m2ts|wmv|flv)$/.test(name)) {
+        log("browser cannot play this container via /media — switching to HLS");
+        return playHls();
+      }
+      video.src = `${base()}/v1/torrents/${id}/media`;
+      video.play().catch(() => log("press play (/media)"));
+      log("playing progressive /media (mp4/webm only in Chrome)");
+    }
+
+    function trackOptionLabel(t) {
+      const bits = [
+        t.language,
+        t.title,
+        t.codec,
+        t.text_based === false ? "hardsub" : null,
+        t.default ? "default" : null,
+      ].filter(Boolean);
+      return `#${t.index} ${bits.join(" · ")}`;
+    }
+
+    function fillSelect(sel, items, emptyLabel) {
+      const prev = sel.value;
+      sel.innerHTML = "";
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = emptyLabel;
+      sel.appendChild(empty);
+      for (const t of items || []) {
+        const opt = document.createElement("option");
+        opt.value = String(t.index);
+        opt.textContent = trackOptionLabel(t);
+        sel.appendChild(opt);
+      }
+      if ([...sel.options].some((o) => o.value === prev) && prev !== "") {
+        sel.value = prev;
+      } else {
+        const def = (items || []).find((t) => t.default);
+        if (def) sel.value = String(def.index);
+      }
+    }
+
+    async function probeTracks({ silent = false } = {}) {
+      const id = await needId();
+      const t = await api(`/v1/torrents/${id}/tracks`);
+      state.tracks = t;
+      if (!silent) {
+        log("tracks", {
+          audio: (t.audio || []).length,
+          subs: (t.subtitles || []).length,
+          needs_hls: t.needs_hls,
+        });
+      }
+      fillSelect($("audioTrack"), t.audio, "default");
+      fillSelect($("subTrack"), t.subtitles, "off");
+      const aN = (t.audio || []).length;
+      const sN = (t.subtitles || []).length;
+      $("trackHint").textContent =
+        `${aN} audio · ${sN} subtitle` +
+        (t.needs_hls ? " · needs HLS" : "") +
+        (t.hdr ? " · HDR" : "");
+      return t;
+    }
+
+    async function boost() {
+      const id = await needId();
+      const j = await api(`/v1/torrents/${id}/boost`, {
+        method: "POST",
+        body: JSON.stringify({ duration_sec: 30, multiplier: 2 }),
+      });
+      log("boost", j);
+    }
+
+    async function setAbr() {
+      if (!state.id) return;
+      const height = Number($("abrHeight").value) || 0;
+      try {
+        const j = await api(`/v1/torrents/${state.id}/abr`, {
+          method: "POST",
+          body: JSON.stringify({ height }),
+        });
+        log("abr", j);
+        if (state.hls) applyAbrPreference(state.hls);
+      } catch (e) {
+        log("abr failed: " + e.message);
+      }
+    }
+
+    async function invite() {
+      const id = await needId();
+      const j = await api(`/v1/torrents/${id}/invite`);
+      log("invite", j);
+      $("inviteBox").classList.add("show");
+      $("inviteText").textContent = j.qr_text || j.magnet || JSON.stringify(j, null, 2);
+      if (window.QRCode && j.qr_text) {
+        QRCode.toCanvas($("qr"), j.qr_text, { width: 128, margin: 1 }, (err) => {
+          if (err) log("qr error: " + err.message);
+        });
+      }
+    }
+
+    async function poster() {
+      const id = await needId();
+      await api(`/v1/torrents/${id}/poster`, { method: "POST" });
+      $("video").poster = `${base()}/v1/torrents/${id}/poster.jpg?t=${Date.now()}`;
+      log("poster ready");
+    }
+
+    async function pause() {
+      const id = await needId();
+      await api(`/v1/torrents/${id}/pause`, { method: "POST" });
+      log("paused");
+      refreshJobs();
+    }
+    async function resume() {
+      const id = await needId();
+      await api(`/v1/torrents/${id}/resume`, { method: "POST" });
+      log("resumed");
+      refreshJobs();
+    }
+    async function removeJob() {
+      const id = await needId();
+      await api(`/v1/torrents/${id}?delete_files=false`, { method: "DELETE" });
+      destroyHls();
+      $("video").removeAttribute("src");
+      $("video").load();
+      state.id = null;
+      localStorage.removeItem("te_id");
+      log("removed " + id);
+      refreshJobs();
+    }
+
+    $("btnConnect").onclick = () => connect().catch((e) => log(e.message));
+    $("btnFind").onclick = () => findEngine().catch((e) => log(e.message));
+    $("btnAdd").onclick = () => addTorrent().catch((e) => log(e.message));
+    $("btnRefresh").onclick = () => refreshJobs().catch((e) => log(e.message));
+    $("btnHls").onclick = () => playHls().catch((e) => log("hls: " + e.message));
+    $("btnMedia").onclick = () => playMedia().catch((e) => log("media: " + e.message));
+    $("btnTracks").onclick = () => probeTracks().catch((e) => log(e.message));
+    $("btnBoost").onclick = () => boost().catch((e) => log(e.message));
+    $("btnInvite").onclick = () => invite().catch((e) => log(e.message));
+    $("btnPoster").onclick = () => poster().catch((e) => log(e.message));
+    $("btnPause").onclick = () => pause().catch((e) => log(e.message));
+    $("btnResume").onclick = () => resume().catch((e) => log(e.message));
+    $("btnRemove").onclick = () => removeJob().catch((e) => log(e.message));
+    $("abrHeight").onchange = () => setAbr();
+    $("audioTrack").onchange = () => onAudioChanged().catch((e) => log(e.message));
+    $("subTrack").onchange = () => onSubChanged().catch((e) => log(e.message));
+
+    // Far seek → restart HLS with absolute start_seconds.
+    // After a restart, video.currentTime is relative to hlsOriginSec.
+    let seekBusy = false;
+    $("video").addEventListener("seeking", async () => {
+      if (!state.hls || !state.id || seekBusy) return;
+      const video = $("video");
+      const relative = video.currentTime;
+      if (!Number.isFinite(relative) || relative < 0) return;
+      let bufferedOk = false;
+      try {
+        for (let i = 0; i < video.buffered.length; i++) {
+          if (
+            relative >= video.buffered.start(i) - 1 &&
+            relative <= video.buffered.end(i) + 2
+          ) {
+            bufferedOk = true;
+            break;
+          }
+        }
+      } catch {
+        bufferedOk = true;
+      }
+      let maxEnd = 0;
+      try {
+        for (let i = 0; i < video.buffered.length; i++) {
+          maxEnd = Math.max(maxEnd, video.buffered.end(i));
+        }
+      } catch (_) {}
+      const farJump = maxEnd > 0 && relative > maxEnd + 8;
+      if (bufferedOk && !farJump) return;
+
+      const absolute = (state.hlsOriginSec || 0) + relative;
+      seekBusy = true;
+      try {
+        log(
+          `far seek → HLS @ absolute ${absolute.toFixed(1)}s ` +
+            `(origin ${state.hlsOriginSec.toFixed(1)} + rel ${relative.toFixed(1)})`
+        );
+        await playHls(absolute);
+      } catch (e) {
+        log("seek restart failed: " + e.message);
+      } finally {
+        seekBusy = false;
+      }
+    });
+
+    connect().catch(() => {});
+  </script>
+</body>
+</html>
