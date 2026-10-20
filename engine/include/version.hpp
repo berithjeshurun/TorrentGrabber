@@ -8,7 +8,9 @@ inline constexpr const char* kOpenApiVersion = "0.1.0";
 inline constexpr const char* kSdkCompatMin = "0.1.0";
 
 // Default manifest URL — override via config update.manifest_url or
-// env TORRENT_ENGINE_UPDATE_URL. Empty until you host a manifest.
-inline constexpr const char* kDefaultUpdateManifestUrl = "";
+// env TORRENT_ENGINE_UPDATE_URL.
+inline constexpr const char* kDefaultUpdateManifestUrl =
+    "https://raw.githubusercontent.com/berithjeshurun/TorrentGrabber/main/"
+    "update/manifest.json";
 
 }  // namespace te
