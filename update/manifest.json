@@ -22,6 +22,6 @@
       "hint": "Upload release zip to GitHub Releases and set url + sha256 here (and on the release manifest URL)."
     }
   },
-  "homepage": "",
-  "manifest_url_hint": "Host this file (or a release copy) at a stable HTTPS URL. Set update.manifest_url in config.yaml or TORRENT_ENGINE_UPDATE_URL."
+  "homepage": "https://github.com/cultforge/TorrentGrabber",
+  "manifest_url": "https://raw.githubusercontent.com/cultforge/TorrentGrabber/main/update/manifest.json"
 }

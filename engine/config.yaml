@@ -31,7 +31,8 @@ share:
 # Self-update (torrent-engine --check-update / --update)
 # Host update/manifest.json on HTTPS (GitHub Releases raw URL works).
 update:
-  manifest_url: ""
+  # Default falls back to GitHub raw manifest if empty
+  manifest_url: "https://raw.githubusercontent.com/cultforge/TorrentGrabber/main/update/manifest.json"
   check_on_start: false
   # Or: set TORRENT_ENGINE_UPDATE_URL=https://…/manifest.json
 
