@@ -13,6 +13,8 @@ local.properties
 .cxx
 
 # Python
+**/__pycache__/
+**/*.py[cod]
 python/**/__pycache__/
 python/**/*.py[cod]
 python/.venv/
